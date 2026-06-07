@@ -1,0 +1,606 @@
+<Window x:Class="ProgramClock.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ProgramClock.UI"
+        Title="ProgramClock" MinHeight="320" MinWidth="480"
+        Icon="/app.ico"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        WindowStartupLocation="Manual">
+    <Window.Resources>
+        <local:RefreshArcConverter x:Key="RefreshArc" />
+        <ContextMenu x:Key="RowContextMenu" x:Shared="False">
+            <MenuItem Header="Delete" Click="OnDeleteSelection" />
+            <MenuItem Header="Block" Click="OnBlockSelection" />
+        </ContextMenu>
+        <ContextMenu x:Key="CategoryAppContextMenu" x:Shared="False">
+            <MenuItem Header="Delete" Click="OnDeleteManagedApp" />
+        </ContextMenu>
+        <ContextMenu x:Key="SiteContextMenu" x:Shared="False">
+            <MenuItem Header="Delete" Click="OnDeleteSelection" />
+            <MenuItem Header="Block" Click="OnBlockSelection" />
+        </ContextMenu>
+
+        <!-- Refresh-countdown ring in the Focused/Running headers. The sorted header paints its
+             background red, so the red arc would vanish on it: flip the whole ring to the theme
+             foreground colour whenever this column is the sorted one. -->
+        <Style x:Key="WheelTrack" TargetType="Ellipse">
+            <Setter Property="Stroke" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="StrokeThickness" Value="2.5" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding SortDirection, RelativeSource={RelativeSource AncestorType=DataGridColumnHeader}}" Value="Ascending">
+                    <Setter Property="Stroke" Value="{DynamicResource ForegroundBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding SortDirection, RelativeSource={RelativeSource AncestorType=DataGridColumnHeader}}" Value="Descending">
+                    <Setter Property="Stroke" Value="{DynamicResource ForegroundBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="WheelArc" TargetType="Path">
+            <Setter Property="Stroke" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="StrokeThickness" Value="2.5" />
+            <Setter Property="StrokeStartLineCap" Value="Round" />
+            <Setter Property="StrokeEndLineCap" Value="Round" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding SortDirection, RelativeSource={RelativeSource AncestorType=DataGridColumnHeader}}" Value="Ascending">
+                    <Setter Property="Stroke" Value="{DynamicResource ForegroundBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding SortDirection, RelativeSource={RelativeSource AncestorType=DataGridColumnHeader}}" Value="Descending">
+                    <Setter Property="Stroke" Value="{DynamicResource ForegroundBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="12">
+
+        <!-- ===== Dashboard view ===== -->
+        <DockPanel Visibility="{Binding DashboardVisibility}">
+            <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Total Focused: " FontWeight="Bold" />
+                    <TextBlock Text="{Binding TotalFocus}" Margin="0,0,16,0" />
+                    <TextBlock Text="Total Running: " FontWeight="Bold" />
+                    <TextBlock Text="{Binding TotalRun}" Margin="0,0,16,0" />
+
+                    <Border CornerRadius="10" Padding="10,2" VerticalAlignment="Center">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="{DynamicResource ActiveBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsUserIdle}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding IdleStatusText}" Foreground="White"
+                                   FontWeight="SemiBold" FontSize="11" />
+                    </Border>
+
+                    <Border CornerRadius="10" Padding="10,2" Margin="8,0,0,0" VerticalAlignment="Center"
+                            ToolTip="{Binding EfficiencyTooltip}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding EfficiencyTier}" Value="Excellent">
+                                        <Setter Property="Background" Value="{DynamicResource ActiveBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding EfficiencyTier}" Value="Good">
+                                        <Setter Property="Background" Value="{DynamicResource ActiveBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding EfficiencyTier}" Value="Fair">
+                                        <Setter Property="Background" Value="{DynamicResource WarningBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding EfficiencyTier}" Value="Poor">
+                                        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding EfficiencyText}" Foreground="White"
+                                   FontWeight="SemiBold" FontSize="11" />
+                    </Border>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Range:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox ItemsSource="{Binding Ranges}"
+                              SelectedItem="{Binding SelectedRange}"
+                              Width="110" VerticalAlignment="Center" />
+                    <Button Content="Refresh" Style="{StaticResource SubtleButton}"
+                            Visibility="{Binding ManualRefreshVisibility}"
+                            Click="OnManualRefresh" Margin="8,0,0,0" />
+                    <Button Content="Categories" Style="{StaticResource SubtleButton}"
+                            Click="OnOpenCategories" Margin="8,0,0,0" />
+                    <Button Content="Settings" Click="OnOpenSettings" Margin="8,0,0,0" />
+                </StackPanel>
+            </Grid>
+
+            <DataGrid x:Name="DashboardGrid"
+                      ItemsSource="{Binding Rows}"
+                      ContextMenuOpening="OnRowContextMenuOpening"
+                      Sorting="OnGridSorting"
+                      PreviewKeyDown="OnGridKeyDown"
+                      PreviewMouseLeftButtonDown="OnGridMouseDown"
+                      PreviewMouseMove="OnGridMouseMove"
+                      PreviewMouseLeftButtonUp="OnGridMouseUp"
+                      LostMouseCapture="OnGridLostMouseCapture"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      CanUserAddRows="False"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      SelectionMode="Extended"
+                      SelectionUnit="FullRow"
+                      RowDetailsVisibilityMode="Visible">
+                <DataGrid.Resources>
+                    <local:BindingProxy x:Key="proxy" Data="{Binding}" />
+                </DataGrid.Resources>
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow">
+                        <Setter Property="ContextMenu" Value="{StaticResource RowContextMenu}" />
+                        <!-- Two-way bound so selecting a browser row also selects all of its website
+                             sub-rows (see UsageRowVm.IsRowSelected), and the unified delete/block can
+                             treat apps and sites as one selection. -->
+                        <Setter Property="IsSelected" Value="{Binding IsRowSelected, Mode=TwoWay}" />
+                    </Style>
+                </DataGrid.RowStyle>
+                <!-- Browser rows expand into a per-website focused-time breakdown. The list is always
+                     present but collapses to nothing unless the row is expanded and has websites
+                     (SitesDetailsVisibility), so opening/closing is driven by the disclosure toggle
+                     and is independent of row selection. Columns line up with the main grid; values
+                     that match the parent browser are dashed out instead of repeating. -->
+                <DataGrid.RowDetailsTemplate>
+                    <DataTemplate>
+                        <Border Visibility="{Binding SitesDetailsVisibility}"
+                                Background="{DynamicResource SurfaceBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+                            <!-- A ListBox (not an ItemsControl) so websites get click / Ctrl-click /
+                                 Shift-click / drag multi-selection like the main grid. The parent
+                                 grid's mouse handlers leave RowDetails clicks to WPF (see Classify),
+                                 so this list owns its own selection via its own drag handlers. -->
+                            <ListBox ItemsSource="{Binding Sites}"
+                                     SelectionMode="Extended"
+                                     Background="Transparent" BorderThickness="0" Padding="0"
+                                     ContextMenu="{StaticResource SiteContextMenu}"
+                                     ContextMenuOpening="OnSiteContextMenuOpening"
+                                     PreviewMouseLeftButtonDown="OnSiteMouseDown"
+                                     PreviewMouseMove="OnSiteMouseMove"
+                                     PreviewMouseLeftButtonUp="OnSiteMouseUp"
+                                     LostMouseCapture="OnSiteLostMouseCapture"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     HorizontalContentAlignment="Stretch">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="Bd" Background="Transparent">
+                                                        <ContentPresenter />
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="Bd" Property="Background"
+                                                                    Value="{DynamicResource AccentBrush}" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <!-- Column widths mirror the main grid (18 / * / 160 / 140 /
+                                             100 / 120 / 120) so websites line up under their columns. -->
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="18" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="160" />
+                                                <ColumnDefinition Width="140" />
+                                                <ColumnDefinition Width="100" />
+                                                <ColumnDefinition Width="120" />
+                                                <ColumnDefinition Width="120" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="1" Text="{Binding Host}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Margin="8,4" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="--" Margin="8,4"
+                                                       Foreground="{DynamicResource SubtleBrush}"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="3" Text="--" Margin="8,4"
+                                                       Foreground="{DynamicResource SubtleBrush}"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="4" Text="--" Margin="8,4"
+                                                       Foreground="{DynamicResource SubtleBrush}"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="5" Text="{Binding FocusTime}"
+                                                       Margin="8,4" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="6" Text="--" Margin="8,4"
+                                                       Foreground="{DynamicResource SubtleBrush}"
+                                                       VerticalAlignment="Center" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
+                    </DataTemplate>
+                </DataGrid.RowDetailsTemplate>
+                <DataGrid.Columns>
+                    <!-- Disclosure toggle: shown only on browser rows that have websites. Clicking it
+                         opens/closes the site list (IsExpanded) independently of row selection; the
+                         grid's mouse handlers leave it to WPF by name (see Classify). -->
+                    <DataGridTemplateColumn Width="18">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <ToggleButton x:Name="DisclosureToggle"
+                                              IsChecked="{Binding IsExpanded, Mode=TwoWay}"
+                                              Visibility="{Binding SitesVisibility}"
+                                              Background="Transparent" BorderThickness="0"
+                                              Cursor="Hand" Focusable="False"
+                                              ToolTip="Show or hide this browser's websites">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border Background="Transparent">
+                                                <TextBlock x:Name="Glyph" Text="›" FontWeight="Bold"
+                                                           FontSize="14"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource SubtleBrush}" />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="Glyph" Property="Text" Value="⌄" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
+                                </ToggleButton>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="Application" Binding="{Binding DisplayName}" Width="*" />
+                    <DataGridTextColumn Header="Executable" Binding="{Binding ExeName}" Width="160" />
+                    <DataGridTextColumn Header="Category" Binding="{Binding CategoryName}" Width="140" />
+                    <DataGridTextColumn Header="Tag" Binding="{Binding TagName}" Width="100" />
+                    <DataGridTextColumn x:Name="FocusedColumn" Binding="{Binding FocusTime}" Width="120"
+                                        SortMemberPath="FocusMs">
+                        <DataGridTextColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Focused" VerticalAlignment="Center" />
+                                <Canvas Width="16" Height="16" Margin="6,0,0,0" VerticalAlignment="Center"
+                                        Visibility="{Binding Data.FocusWheelVisibility, Source={StaticResource proxy}}"
+                                        ToolTip="Focused-time refresh countdown">
+                                    <Ellipse Width="14" Height="14" Canvas.Left="1" Canvas.Top="1"
+                                             Style="{StaticResource WheelTrack}" />
+                                    <Path Canvas.Left="1" Canvas.Top="1" Style="{StaticResource WheelArc}"
+                                          Data="{Binding Data.FocusRefreshFraction, Source={StaticResource proxy},
+                                                 Converter={StaticResource RefreshArc}, ConverterParameter=7}" />
+                                </Canvas>
+                            </StackPanel>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding RunTime}" Width="120"
+                                        SortMemberPath="RunMs">
+                        <DataGridTextColumn.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Running" VerticalAlignment="Center" />
+                                <Canvas Width="16" Height="16" Margin="6,0,0,0" VerticalAlignment="Center"
+                                        Visibility="{Binding Data.RunWheelVisibility, Source={StaticResource proxy}}"
+                                        ToolTip="Running-time refresh countdown">
+                                    <Ellipse Width="14" Height="14" Canvas.Left="1" Canvas.Top="1"
+                                             Style="{StaticResource WheelTrack}" />
+                                    <Path Canvas.Left="1" Canvas.Top="1" Style="{StaticResource WheelArc}"
+                                          Data="{Binding Data.RunRefreshFraction, Source={StaticResource proxy},
+                                                 Converter={StaticResource RefreshArc}, ConverterParameter=7}" />
+                                </Canvas>
+                            </StackPanel>
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </DockPanel>
+
+        <!-- ===== Settings view ===== -->
+        <Grid Visibility="{Binding SettingsVisibility}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
+                <TextBlock Text="Settings" FontSize="18" FontWeight="Bold"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <CheckBox x:Name="AutoStartCheck" Content="Start ProgramClock with Windows"
+                          Margin="0,0,0,16" />
+
+                <TextBlock Text="Pause focused-time tracking after this many seconds of no input:"
+                           TextWrapping="Wrap" Margin="0,0,0,6" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                    <TextBox x:Name="IdleSecondsBox" Width="80" />
+                    <TextBlock Text="seconds" VerticalAlignment="Center" Margin="8,0,0,0" />
+                </StackPanel>
+
+                <TextBlock Text="Refresh focused time every:" Margin="0,0,0,6" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                    <TextBox x:Name="FocusRefreshBox" Width="80" />
+                    <TextBlock Text="seconds" VerticalAlignment="Center" Margin="8,0,0,0" />
+                </StackPanel>
+
+                <TextBlock Text="Refresh running time every:" Margin="0,0,0,6" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                    <TextBox x:Name="RunRefreshBox" Width="80" />
+                    <TextBlock Text="seconds" VerticalAlignment="Center" Margin="8,0,0,0" />
+                </StackPanel>
+
+                <TextBlock Text="Keyboard shortcuts" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TextBlock Text="Click a box and press a key to bind it. The shortcut applies to the current selection (apps and websites) while the dashboard list has focus. Clear a box to unbind it."
+                           Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                           TextWrapping="Wrap" Margin="0,0,0,6" />
+                <Grid Margin="0,0,0,16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="130" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Delete selection"
+                               VerticalAlignment="Center" />
+                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="DeleteHotkeyBox" IsReadOnly="True"
+                             Margin="0,2" Cursor="Hand" PreviewKeyDown="OnHotkeyCapture"
+                             ToolTip="Click here, then press a key" />
+                    <Button Grid.Row="0" Grid.Column="2" Content="Clear"
+                            Style="{StaticResource SubtleButton}" Padding="6,2"
+                            Margin="8,2,0,2" Click="OnClearDeleteHotkey" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Block selection"
+                               VerticalAlignment="Center" Margin="0,2,0,0" />
+                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="BlockHotkeyBox" IsReadOnly="True"
+                             Margin="0,2" Cursor="Hand" PreviewKeyDown="OnHotkeyCapture"
+                             ToolTip="Click here, then press a key" />
+                    <Button Grid.Row="1" Grid.Column="2" Content="Clear"
+                            Style="{StaticResource SubtleButton}" Padding="6,2"
+                            Margin="8,2,0,2" Click="OnClearBlockHotkey" />
+                </Grid>
+
+                <TextBlock Text="Tags &amp; efficiency" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TextBlock Text="Rename each tag and set how much its focused time counts toward the efficiency score (0 = ignored)."
+                           Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                           TextWrapping="Wrap" Margin="0,0,0,6" />
+                <Grid Margin="0,0,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="90" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Tag" Foreground="{DynamicResource SubtleBrush}" FontSize="11" />
+                    <TextBlock Grid.Column="1" Text="Display name" Foreground="{DynamicResource SubtleBrush}" FontSize="11" />
+                    <TextBlock Grid.Column="2" Text="Weight" Foreground="{DynamicResource SubtleBrush}" FontSize="11" />
+                </Grid>
+                <ItemsControl ItemsSource="{Binding TagLabels}" Margin="0,0,0,16">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="90" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding TagKey}" VerticalAlignment="Center" />
+                                <TextBox Grid.Column="1" Margin="0,0,8,0"
+                                         Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBox Grid.Column="2"
+                                         Text="{Binding Weight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="Efficiency rating names" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <ItemsControl ItemsSource="{Binding TierLabels}" Margin="0,0,0,16">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding TierKey}" VerticalAlignment="Center" />
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="Blocked apps" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TextBlock Text="These apps are not tracked. Unblock to detect them again."
+                           Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                           TextWrapping="Wrap" Margin="0,0,0,6" />
+                <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                        CornerRadius="4" Padding="4" MaxHeight="160" MinHeight="44">
+                    <Grid>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding BlockedApps}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="2">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+                                            <Button Grid.Column="1" Content="Unblock"
+                                                    Style="{StaticResource SubtleButton}"
+                                                    Padding="6,2" Click="OnUnblockApp" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                        <TextBlock Text="No Blocked Apps" Foreground="{DynamicResource SubtleBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Visibility="{Binding NoBlockedAppsVisibility}" />
+                    </Grid>
+                </Border>
+
+                <TextBlock Text="Blocked websites" FontWeight="SemiBold" Margin="0,16,0,6" />
+                <TextBlock Text="These websites are not tracked under any browser. Unblock to track them again."
+                           Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                           TextWrapping="Wrap" Margin="0,0,0,6" />
+                <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                        CornerRadius="4" Padding="4" MaxHeight="160" MinHeight="44">
+                    <Grid>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding BlockedSites}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="2">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+                                            <Button Grid.Column="1" Content="Unblock"
+                                                    Style="{StaticResource SubtleButton}"
+                                                    Padding="6,2" Click="OnUnblockSite" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                        <TextBlock Text="No Blocked Websites" Foreground="{DynamicResource SubtleBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Visibility="{Binding NoBlockedSitesVisibility}" />
+                    </Grid>
+                </Border>
+
+                <TextBlock x:Name="StatusText" Foreground="{DynamicResource AccentBrush}"
+                           Margin="0,8,0,0" />
+            </StackPanel>
+            </ScrollViewer>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                        Margin="0,16,0,0">
+                <Button Content="Back" Style="{StaticResource SubtleButton}" Width="90"
+                        Margin="0,0,8,0" Click="OnBackToDashboard" />
+                <Button Content="Save" Width="90" Click="OnSaveSettings" IsDefault="True" />
+            </StackPanel>
+        </Grid>
+
+        <!-- ===== Categories view ===== -->
+        <Grid Visibility="{Binding CategoriesVisibility}">
+            <Grid.Resources>
+                <local:BindingProxy x:Key="catProxy" Data="{Binding}" />
+            </Grid.Resources>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Margin="0,0,0,16">
+                <TextBlock Text="Categories" FontSize="18" FontWeight="Bold"
+                           VerticalAlignment="Center" />
+                <Button Content="Back" Style="{StaticResource SubtleButton}" Width="90"
+                        HorizontalAlignment="Right" Click="OnBackFromCategories" />
+            </Grid>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="300" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Manage categories -->
+                <DockPanel Grid.Column="0" Margin="0,0,16,0">
+                    <TextBlock DockPanel.Dock="Top" Text="Manage categories"
+                               FontWeight="SemiBold" Margin="0,0,0,8" />
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBox x:Name="NewCategoryBox" Width="190" />
+                        <Button Content="Add" Width="70" Margin="8,0,0,0" Click="OnAddCategory" />
+                    </StackPanel>
+                    <DataGrid ItemsSource="{Binding ManagedCategories}"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal"
+                              SelectionMode="Single">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" />
+                            <DataGridTextColumn Header="Origin" Binding="{Binding Origin}"
+                                                Width="70" IsReadOnly="True" />
+                            <DataGridTemplateColumn Header="" Width="80" IsReadOnly="True">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="Delete" Style="{StaticResource SubtleButton}"
+                                                Padding="6,2" Click="OnDeleteCategory" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+
+                <!-- Assign apps -->
+                <DockPanel Grid.Column="1">
+                    <TextBlock DockPanel.Dock="Top" Text="Assign apps to categories"
+                               FontWeight="SemiBold" Margin="0,0,0,8" />
+                    <DataGrid ItemsSource="{Binding ManagedApps}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal"
+                              SelectionMode="Single">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="ContextMenu" Value="{StaticResource CategoryAppContextMenu}" />
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Application" Binding="{Binding DisplayName}" Width="*" />
+                            <DataGridTextColumn Header="Executable" Binding="{Binding ExeName}" Width="150" />
+                            <DataGridTemplateColumn Header="Category" Width="180">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ComboBox Margin="2"
+                                                  ItemsSource="{Binding Data.CategoryChoices, Source={StaticResource catProxy}}"
+                                                  SelectedValuePath="Id" DisplayMemberPath="Name"
+                                                  SelectedValue="{Binding CategoryId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Tag" Width="130">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ComboBox Margin="2"
+                                                  ItemsSource="{Binding Data.TagChoices, Source={StaticResource catProxy}}"
+                                                  SelectedValuePath="Tag" DisplayMemberPath="Name"
+                                                  SelectedValue="{Binding Tag, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Grid>
+        </Grid>
+
+    </Grid>
+</Window>
