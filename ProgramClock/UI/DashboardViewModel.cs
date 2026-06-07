@@ -359,6 +359,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
             OnChanged(nameof(DashboardVisibility));
             OnChanged(nameof(SettingsVisibility));
             OnChanged(nameof(CategoriesVisibility));
+            // Timer-driven reloads are skipped while another page is shown (the grid is collapsed),
+            // so refresh once on return so the Dashboard shows current data immediately.
+            if (value == DashboardPage.Dashboard) Reload();
         }
     }
 
@@ -504,13 +507,14 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     {
         _focusEpochUtc = DateTime.UtcNow;
         IsUserIdle = _tracker.IsUserIdle;
-        Reload();
+        // Only rebuild the grid when it's actually on screen; the Page setter reloads on return.
+        if (_page == DashboardPage.Dashboard) Reload();
     });
 
     private void OnRunSampled() => _dispatcher.BeginInvoke(() =>
     {
         _runEpochUtc = DateTime.UtcNow;
-        Reload();
+        if (_page == DashboardPage.Dashboard) Reload();
     });
 
     private void UpdateWheel()
