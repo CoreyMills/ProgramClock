@@ -5,7 +5,8 @@
         Title="ProgramClock" MinHeight="320" MinWidth="480"
         Icon="/app.ico"
         Background="{DynamicResource WindowBackgroundBrush}"
-        WindowStartupLocation="Manual">
+        WindowStartupLocation="Manual"
+        PreviewKeyDown="OnWindowKeyDown">
     <Window.Resources>
         <local:RefreshArcConverter x:Key="RefreshArc" />
         <ContextMenu x:Key="RowContextMenu" x:Shared="False">
@@ -125,7 +126,6 @@
                       ItemsSource="{Binding Rows}"
                       ContextMenuOpening="OnRowContextMenuOpening"
                       Sorting="OnGridSorting"
-                      PreviewKeyDown="OnGridKeyDown"
                       PreviewMouseLeftButtonDown="OnGridMouseDown"
                       PreviewMouseMove="OnGridMouseMove"
                       PreviewMouseLeftButtonUp="OnGridMouseUp"

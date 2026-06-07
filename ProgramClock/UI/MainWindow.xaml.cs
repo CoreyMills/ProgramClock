@@ -52,8 +52,15 @@ public partial class MainWindow : Window
         !string.IsNullOrWhiteSpace(name) && Enum.TryParse<Key>(name, out var k) && k != Key.None
             ? k : null;
 
-    private void OnGridKeyDown(object sender, KeyEventArgs e)
+    // Handled at the window level (not the grid) so it fires no matter where keyboard focus sits:
+    // selecting rows through the custom mouse handlers never moves focus into the grid, so a
+    // grid-scoped PreviewKeyDown would never see the keystroke. Guarded to the dashboard view and
+    // skipped while a text box has focus so it can't fire while the user types in Settings.
+    private void OnWindowKeyDown(object sender, KeyEventArgs e)
     {
+        if (_vm.Page != DashboardPage.Dashboard) return;
+        if (Keyboard.FocusedElement is TextBox) return;
+
         // Alt routes the real key through SystemKey; normalise so e.g. Alt-bound keys still match.
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         if (_deleteHotkey is { } dk && key == dk)
@@ -141,8 +148,33 @@ public partial class MainWindow : Window
         return HitKind.Empty;
     }
 
+    // Walk up from a hit element to the disclosure toggle (if any) and return the browser row it
+    // belongs to. The toggle's DataContext is the row's UsageRowVm.
+    private static UsageRowVm? DisclosureRow(object source)
+    {
+        var d = source as DependencyObject;
+        while (d is not null)
+        {
+            if (d is FrameworkElement { Name: "DisclosureToggle" } fe)
+                return fe.DataContext as UsageRowVm;
+            d = System.Windows.Media.VisualTreeHelper.GetParent(d);
+        }
+        return null;
+    }
+
     private void OnGridMouseDown(object sender, MouseButtonEventArgs e)
     {
+        // Expand/collapse the website breakdown ourselves. The ToggleButton's own click is unreliable
+        // inside the grid — the preview mouse handlers here plus the DataGridCell's class handlers
+        // swallow it, so its IsChecked->IsExpanded binding never fires. Toggling IsExpanded directly
+        // (the toggle's IsChecked follows it via the two-way binding) makes the arrow work every time.
+        if (DisclosureRow(e.OriginalSource) is { } toggleRow)
+        {
+            toggleRow.IsExpanded = !toggleRow.IsExpanded;
+            e.Handled = true;
+            return;
+        }
+
         var kind = Classify(e.OriginalSource, out var row);
         if (kind == HitKind.Chrome) return;   // header click / scrollbar drag: don't interfere
 
