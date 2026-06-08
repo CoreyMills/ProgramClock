@@ -1,5 +1,13 @@
 # ProgramClock
 
+![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)
+![.NET](https://img.shields.io/badge/.NET-9.0-512BD4?logo=dotnet&logoColor=white)
+![Language](https://img.shields.io/badge/language-C%23-239120?logo=csharp&logoColor=white)
+![Data](https://img.shields.io/badge/data-100%25%20local-success)
+![License](https://img.shields.io/github/license/CoreyMills/ProgramClock)
+![Last commit](https://img.shields.io/github/last-commit/CoreyMills/ProgramClock)
+![Issues](https://img.shields.io/github/issues/CoreyMills/ProgramClock)
+
 A lightweight Windows tray app that tracks, per application, **how long it has been
 running** and **how long you were actually focused in it** — plus a per-website
 focused-time breakdown for browsers. Everything stays on your machine.
