@@ -26,14 +26,40 @@ public sealed class Database : IDisposable
         Connection.Open();
         Exec("PRAGMA journal_mode=WAL;");
         Exec("PRAGMA foreign_keys=ON;");
-        InitSchema();
+        Migrate();
     }
 
-    private void InitSchema()
+    /// <summary>
+    /// Brings the on-disk schema up to <see cref="SchemaVersion"/> by running ordered migration
+    /// steps from whatever version the file is currently at.
+    /// <para>
+    /// This is what guarantees a user's settings (and history) survive app updates. The updater only
+    /// swaps <c>ProgramClock.exe</c>; this database file in <c>%LOCALAPPDATA%</c> is never touched by
+    /// it. Migrations here are required to be <b>strictly additive</b> — only <c>CREATE … IF NOT
+    /// EXISTS</c> and <c>ALTER TABLE … ADD COLUMN</c>, never <c>DROP</c> or destructive rewrites — so
+    /// upgrading can introduce new tables/columns/settings without resetting anything that already
+    /// exists. A user's stored setting changes only if a future migration deliberately rewrites that
+    /// specific row.
+    /// </para>
+    /// </summary>
+    private void Migrate()
+    {
+        Exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);");
+
+        int current = GetSchemaVersion();   // 0 for a brand-new database file
+
+        // Each step is additive and idempotent. To evolve the schema later, bump SchemaVersion and add
+        // a new `if (current < N) { … }` block below — do NOT edit an already-shipped step, and never
+        // drop/recreate a table that holds user data.
+        if (current < 1) MigrateToV1();
+
+        if (current != SchemaVersion) SetSchemaVersion(SchemaVersion);
+    }
+
+    /// <summary>v1 baseline: the original table set. Safe to run against an existing v1 database.</summary>
+    private void MigrateToV1()
     {
         Exec("""
-            CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
-
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -93,17 +119,24 @@ public sealed class Database : IDisposable
                 blocked_at TEXT NOT NULL
             );
             """);
+    }
 
-        using var check = Connection.CreateCommand();
-        check.CommandText = "SELECT version FROM schema_version LIMIT 1;";
-        var existing = check.ExecuteScalar();
-        if (existing is null)
-        {
-            using var ins = Connection.CreateCommand();
-            ins.CommandText = "INSERT INTO schema_version(version) VALUES($v);";
-            ins.Parameters.AddWithValue("$v", SchemaVersion);
-            ins.ExecuteNonQuery();
-        }
+    /// <summary>Returns the schema version recorded in the file, or 0 if none has been written yet.</summary>
+    private int GetSchemaVersion()
+    {
+        using var cmd = Connection.CreateCommand();
+        cmd.CommandText = "SELECT version FROM schema_version LIMIT 1;";
+        var existing = cmd.ExecuteScalar();
+        return existing is null or DBNull ? 0 : Convert.ToInt32(existing);
+    }
+
+    /// <summary>Records the schema version, replacing any existing value (keeps a single row).</summary>
+    private void SetSchemaVersion(int version)
+    {
+        using var cmd = Connection.CreateCommand();
+        cmd.CommandText = "DELETE FROM schema_version; INSERT INTO schema_version(version) VALUES($v);";
+        cmd.Parameters.AddWithValue("$v", version);
+        cmd.ExecuteNonQuery();
     }
 
     private void Exec(string sql)

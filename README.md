@@ -33,17 +33,26 @@ focused-time breakdown for browsers. Everything stays on your machine.
 - **System theme** — follows Windows light/dark with a red accent. Configurable refresh
   intervals with live countdown rings and a manual refresh button.
 - **Start with Windows** — optional autostart via the current-user registry Run key.
+- **Opt-in updates** — check GitHub for a newer release and update in place from Settings.
+  The only network feature in the app; **off by default** and never sends any of your data.
 
 ## Privacy
 
-ProgramClock is **entirely local and self-contained**:
+ProgramClock keeps **all of your tracking data on your machine** — it is never uploaded
+anywhere, and there is no telemetry, analytics, or crash reporting of any kind:
 
-- **No network.** There is no HTTP/socket/networking code anywhere in the app.
+- **No telemetry.** Your usage data never leaves the machine. The app has no analytics,
+  ads, or tracking, and nothing about how you use your computer is ever transmitted.
+- **One opt-in network feature.** The only code that touches the network is the **update
+  checker**, which is **off by default**. When you click *Check for Updates* / *Update Now*
+  (or enable the once-a-day check), it makes plain HTTPS requests to the public GitHub
+  Releases API to look for and download a newer build — and nothing else. No identifying
+  or usage information is sent.
 - **Read-only observation.** It never injects input, sends window messages, writes to,
   or modifies any other process. All OS calls are observational
   (`GetForegroundWindow`, `GetLastInputInfo`, process enumeration, and reading the
   browser address bar via UI Automation).
-- **The only thing it persists** is a local SQLite database at
+- **What it persists** is a local SQLite database at
   `%LOCALAPPDATA%\ProgramClock\programclock.db`, plus an optional `HKCU\…\Run` key when
   autostart is enabled.
 

@@ -446,6 +446,45 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     public Visibility ManualRefreshVisibility =>
         ShowManualRefresh ? Visibility.Visible : Visibility.Collapsed;
 
+    // ---- Auto-update state (settings page) ----
+
+    private string _updateStatusText = "";
+    /// <summary>Status line under the update buttons (e.g. "Checking…", "Up to date").</summary>
+    public string UpdateStatusText
+    {
+        get => _updateStatusText;
+        set { if (_updateStatusText != value) { _updateStatusText = value; OnChanged(); } }
+    }
+
+    private bool _updateControlsEnabled = true;
+    /// <summary>False while a check/download is in flight, to disable the update buttons.</summary>
+    public bool UpdateControlsEnabled
+    {
+        get => _updateControlsEnabled;
+        set { if (_updateControlsEnabled != value) { _updateControlsEnabled = value; OnChanged(); } }
+    }
+
+    private double _downloadProgress;
+    /// <summary>Download progress, 0–100, driving the progress bar.</summary>
+    public double DownloadProgress
+    {
+        get => _downloadProgress;
+        set { if (_downloadProgress != value) { _downloadProgress = value; OnChanged(); OnChanged(nameof(DownloadPercentText)); } }
+    }
+
+    /// <summary>Right-aligned percentage label under the progress bar.</summary>
+    public string DownloadPercentText => $"{Math.Round(DownloadProgress)}%";
+
+    private bool _isDownloading;
+    /// <summary>True only while a download is in progress; shows/hides the whole progress block.</summary>
+    public bool IsDownloading
+    {
+        get => _isDownloading;
+        set { if (_isDownloading != value) { _isDownloading = value; OnChanged(); OnChanged(nameof(DownloadVisibility)); } }
+    }
+    public Visibility DownloadVisibility =>
+        IsDownloading ? Visibility.Visible : Visibility.Collapsed;
+
     private double _focusRefreshFraction = 1;
     /// <summary>Remaining fraction (1→0) of the focused-time refresh cycle. Drives the ring in
     /// the Focused column header.</summary>

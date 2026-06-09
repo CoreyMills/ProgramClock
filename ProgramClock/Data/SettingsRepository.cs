@@ -101,6 +101,31 @@ public sealed class SettingsRepository
     public string GetBlockHotkey() => Get(BlockHotkeyKey) ?? DefaultBlockHotkey;
     public void SetBlockHotkey(string keyName) => Set(BlockHotkeyKey, keyName.Trim());
 
+    // Auto-update: opt-in. Defaults OFF (not seeded) so the app never reaches the network
+    // unless the user explicitly turns this on. The manual "Check for Updates" / "Update Now"
+    // buttons work regardless of this setting.
+    public const string AutoUpdateEnabledKey = "auto_update_enabled";
+    public bool GetAutoUpdateEnabled() => Get(AutoUpdateEnabledKey) == "1";
+    public void SetAutoUpdateEnabled(bool on) => Set(AutoUpdateEnabledKey, on ? "1" : "0");
+
+    // Last date (local yyyy-MM-dd) an automatic update check ran, so the daily check fires at most once a day.
+    public const string LastUpdateCheckKey = "last_update_check";
+    public string? GetLastUpdateCheckDate() => Get(LastUpdateCheckKey);
+    public void SetLastUpdateCheckDate(string date) => Set(LastUpdateCheckKey, date);
+
+    // User-chosen accent colour (hex, e.g. "#D61414"). Defaults to the app's signature red; when left
+    // at the default the per-theme built-in red is used unchanged.
+    public const string AccentColorKey = "accent_color";
+    public const string DefaultAccentColor = "#D61414";
+    public string GetAccentColor() => Get(AccentColorKey) ?? DefaultAccentColor;
+    public void SetAccentColor(string hex) => Set(AccentColorKey, hex.Trim());
+
+    // User-chosen main (window background) colour. Empty means "follow the Windows light/dark theme";
+    // any hex value overrides the background and derives a matching text/surface/border palette.
+    public const string MainColorKey = "main_color";
+    public string GetMainColor() => Get(MainColorKey) ?? "";
+    public void SetMainColor(string hex) => Set(MainColorKey, hex.Trim());
+
     // Personalizable tag/efficiency labels and weights. Keyed per enum value, e.g. "tag_name_Main".
     private const string TagNamePrefix = "tag_name_";
     private const string TagWeightPrefix = "tag_weight_";

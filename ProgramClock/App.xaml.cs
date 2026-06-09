@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Win32;
 using ProgramClock.Data;
@@ -7,6 +8,7 @@ using ProgramClock.Tracking;
 using ProgramClock.Tray;
 using ProgramClock.UI;
 using ProgramClock.UI.Theme;
+using ProgramClock.Update;
 using Application = System.Windows.Application;
 
 namespace ProgramClock;
@@ -53,6 +55,9 @@ public partial class App : Application
         Categories = new CategoryRepository(_db.Connection);
         Blocklist = new BlocklistRepository(_db.Connection);
 
+        ApplyAccent(Settings.GetAccentColor());
+        ApplyMainColor(Settings.GetMainColor());
+
         if (Settings.Get(FirstRunDoneKey) is null)
         {
             AutoStart.SetEnabled(true);
@@ -85,8 +90,45 @@ public partial class App : Application
         _tray = new TrayMenu(_tracker, _trayIcon, ShowDashboard, ShowSettings, QuitApp);
 
         SystemEvents.SessionEnding += (_, _) => _tracker?.Flush();
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
         ShowDashboard();
+
+        // Opt-in: only reaches the network if the user enabled the daily check.
+        MaybeAutoCheckForUpdates();
+    }
+
+    private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        // Fires on wake-from-sleep; run the (opt-in, once-per-day) update check then.
+        if (e.Mode == PowerModes.Resume)
+            MaybeAutoCheckForUpdates();
+    }
+
+    /// <summary>Runs the automatic update check at most once a day, and only if the user opted in.</summary>
+    private void MaybeAutoCheckForUpdates()
+    {
+        if (!Settings.GetAutoUpdateEnabled()) return;
+
+        var today = UsageRepository.LocalDate(DateTime.Now);
+        if (Settings.GetLastUpdateCheckDate() == today) return;
+        Settings.SetLastUpdateCheckDate(today);
+
+        _ = AutoCheckAsync();
+    }
+
+    private async Task AutoCheckAsync()
+    {
+        var info = await UpdateService.CheckAsync().ConfigureAwait(false);
+        if (info is not null && UpdateService.IsUpdateAvailable(info))
+            Dispatcher.Invoke(() => _tray?.ShowUpdateAvailable(info.Tag));
+    }
+
+    /// <summary>Installs a downloaded update and restarts the app (called from the Settings page).</summary>
+    public void ApplyUpdateAndRestart(string newExePath)
+    {
+        UpdateService.ApplyAndRestart(newExePath);
+        QuitApp();
     }
 
     private void ShowDashboard()
@@ -110,6 +152,19 @@ public partial class App : Application
 
     public void NotifyAutoStartChanged() => _tray?.RefreshAutoStart();
 
+    /// <summary>Applies the accent colour live everywhere. The default red falls back to the theme's
+    /// built-in per-mode shade; any other colour overrides it in both light and dark.</summary>
+    public void ApplyAccent(string hex) =>
+        _theme?.ApplyAccent(
+            string.Equals(hex, SettingsRepository.DefaultAccentColor, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : hex);
+
+    /// <summary>Applies the main (background) colour live. An empty value follows the Windows
+    /// light/dark theme; any colour overrides the background and derives a matching palette.</summary>
+    public void ApplyMainColor(string hex) =>
+        _theme?.ApplyMainColor(string.IsNullOrWhiteSpace(hex) ? null : hex);
+
     private static System.Drawing.Icon LoadAppIcon()
     {
         var info = GetResourceStream(new Uri("app.ico", UriKind.Relative));
@@ -123,6 +178,7 @@ public partial class App : Application
 
     private void QuitApp()
     {
+        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         if (_dashboard is not null)
         {
             _dashboard.AllowClose = true;   // let it really close (and dispose its view model)

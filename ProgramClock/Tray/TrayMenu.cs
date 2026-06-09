@@ -50,6 +50,11 @@ public sealed class TrayMenu : IDisposable
 
     public void RefreshAutoStart() => _autoStartItem.Checked = AutoStart.IsEnabled();
 
+    /// <summary>Shows a tray balloon when the daily auto-check finds a newer release.</summary>
+    public void ShowUpdateAvailable(string tag) =>
+        _icon.ShowBalloonTip(8000, "ProgramClock update available",
+            $"Version {tag} is available. Open Settings to update.", ToolTipIcon.Info);
+
     private void TogglePause()
     {
         if (_tracker.IsPaused) _tracker.Resume(); else _tracker.Pause();

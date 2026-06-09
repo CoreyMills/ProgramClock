@@ -19,3 +19,6 @@ x86/
 ## OS
 Thumbs.db
 .DS_Store
+
+## Release packaging (built locally, uploaded as a GitHub Release asset)
+ProgramClock-win-x64.zip

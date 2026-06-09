@@ -1,0 +1,82 @@
+<UserControl x:Class="ProgramClock.UI.Controls.ColorPicker"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1" CornerRadius="6" Padding="12">
+        <StackPanel Width="236">
+
+            <!-- Saturation / value field -->
+            <Grid Width="236" Height="160" Margin="0,0,0,10">
+                <Border x:Name="SvBox" CornerRadius="4" ClipToBounds="True"
+                        MouseLeftButtonDown="OnSvMouseDown" MouseMove="OnSvMouseMove"
+                        MouseLeftButtonUp="OnSvMouseUp">
+                    <Grid>
+                        <Rectangle x:Name="SvHueRect" />
+                        <Rectangle>
+                            <Rectangle.Fill>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Offset="0" Color="#FFFFFFFF" />
+                                    <GradientStop Offset="1" Color="#00FFFFFF" />
+                                </LinearGradientBrush>
+                            </Rectangle.Fill>
+                        </Rectangle>
+                        <Rectangle>
+                            <Rectangle.Fill>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Offset="0" Color="#00000000" />
+                                    <GradientStop Offset="1" Color="#FF000000" />
+                                </LinearGradientBrush>
+                            </Rectangle.Fill>
+                        </Rectangle>
+                    </Grid>
+                </Border>
+                <Canvas x:Name="SvThumbCanvas" IsHitTestVisible="False">
+                    <Ellipse x:Name="SvThumb" Width="14" Height="14"
+                             Stroke="White" StrokeThickness="2">
+                        <Ellipse.Effect>
+                            <DropShadowEffect ShadowDepth="0" BlurRadius="2" Opacity="0.6" />
+                        </Ellipse.Effect>
+                    </Ellipse>
+                </Canvas>
+            </Grid>
+
+            <!-- Hue slider -->
+            <Grid Width="236" Height="16" Margin="0,0,0,10">
+                <Border x:Name="HueBar" CornerRadius="3" ClipToBounds="True"
+                        MouseLeftButtonDown="OnHueMouseDown" MouseMove="OnHueMouseMove"
+                        MouseLeftButtonUp="OnHueMouseUp">
+                    <Rectangle>
+                        <Rectangle.Fill>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                <GradientStop Offset="0.000" Color="#FF0000" />
+                                <GradientStop Offset="0.167" Color="#FFFF00" />
+                                <GradientStop Offset="0.333" Color="#00FF00" />
+                                <GradientStop Offset="0.500" Color="#00FFFF" />
+                                <GradientStop Offset="0.667" Color="#0000FF" />
+                                <GradientStop Offset="0.833" Color="#FF00FF" />
+                                <GradientStop Offset="1.000" Color="#FF0000" />
+                            </LinearGradientBrush>
+                        </Rectangle.Fill>
+                    </Rectangle>
+                </Border>
+                <Canvas x:Name="HueThumbCanvas" IsHitTestVisible="False">
+                    <Rectangle x:Name="HueThumb" Width="5" Height="16" RadiusX="2" RadiusY="2"
+                               Stroke="White" StrokeThickness="2" Fill="#40000000">
+                        <Rectangle.Effect>
+                            <DropShadowEffect ShadowDepth="0" BlurRadius="2" Opacity="0.6" />
+                        </Rectangle.Effect>
+                    </Rectangle>
+                </Canvas>
+            </Grid>
+
+            <!-- Hex + preview -->
+            <StackPanel Orientation="Horizontal">
+                <Border x:Name="PreviewSwatch" Width="30" Height="30" CornerRadius="4"
+                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,8,0" />
+                <TextBlock Text="Hex" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <TextBox x:Name="HexBox" Width="96" VerticalAlignment="Center"
+                         KeyDown="OnHexKeyDown" LostFocus="OnHexLostFocus" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</UserControl>

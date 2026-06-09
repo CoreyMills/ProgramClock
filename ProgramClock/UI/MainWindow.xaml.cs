@@ -6,6 +6,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using ProgramClock.Data;
 using ProgramClock.Startup;
+using ProgramClock.Update;
 using Brush = System.Windows.Media.Brush;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using ListBox = System.Windows.Controls.ListBox;
@@ -360,8 +361,60 @@ public partial class MainWindow : Window
         DeleteHotkeyBox.Text = HotkeyDisplay(s.GetDeleteHotkey());
         BlockHotkeyBox.Text = HotkeyDisplay(s.GetBlockHotkey());
         AutoStartCheck.IsChecked = AutoStart.IsEnabled();
+        AutoUpdateCheck.IsChecked = s.GetAutoUpdateEnabled();
         StatusText.Text = "";
     }
+
+    // ── Accent colour ─────────────────────────────────────────────────────────────────────────────
+    // The swatch shows the current accent and opens a colour-picker popup. Selections apply and persist
+    // immediately (so the change is visible at once), independent of the Save button.
+
+    private void OnOpenAccentPicker(object sender, RoutedEventArgs e)
+    {
+        AccentPicker.SelectedColor = ((System.Windows.Media.SolidColorBrush)FindResource("AccentBrush")).Color;
+        AccentPopup.IsOpen = true;
+    }
+
+    private void OnAccentPickerChanged(object? sender, EventArgs e) =>
+        ApplyAccentSelection(ToHex(AccentPicker.SelectedColor));
+
+    private void OnResetAccent(object sender, RoutedEventArgs e) =>
+        ApplyAccentSelection(SettingsRepository.DefaultAccentColor);
+
+    private void ApplyAccentSelection(string hex)
+    {
+        App.Current.Settings.SetAccentColor(hex);
+        App.Current.ApplyAccent(hex);
+        StatusText.Text = "";
+    }
+
+    // ── Main (background) colour ──────────────────────────────────────────────────────────────────
+    // Like the accent picker, selections apply and persist immediately. "Use system theme" clears the
+    // override (empty value) so the app follows the Windows light/dark theme.
+
+    private void OnOpenMainPicker(object sender, RoutedEventArgs e)
+    {
+        MainPicker.SelectedColor = ((System.Windows.Media.SolidColorBrush)FindResource("WindowBackgroundBrush")).Color;
+        MainPopup.IsOpen = true;
+    }
+
+    private void OnMainPickerChanged(object? sender, EventArgs e) =>
+        ApplyMainSelection(ToHex(MainPicker.SelectedColor));
+
+    private void OnResetMainColor(object sender, RoutedEventArgs e)
+    {
+        MainPopup.IsOpen = false;
+        ApplyMainSelection("");
+    }
+
+    private void ApplyMainSelection(string hex)
+    {
+        App.Current.Settings.SetMainColor(hex);
+        App.Current.ApplyMainColor(hex);
+        StatusText.Text = "";
+    }
+
+    private static string ToHex(System.Windows.Media.Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
 
     private static string HotkeyDisplay(string keyName) =>
         string.IsNullOrWhiteSpace(keyName) ? NoHotkey : keyName;
@@ -653,7 +706,77 @@ public partial class MainWindow : Window
         AutoStart.SetEnabled(AutoStartCheck.IsChecked == true);
         App.Current.NotifyAutoStartChanged();
 
+        s.SetAutoUpdateEnabled(AutoUpdateCheck.IsChecked == true);
+
         _vm.ApplyRefreshSettings();
         _vm.Page = DashboardPage.Dashboard;
+    }
+
+    // ── Update buttons ────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Manually checks GitHub for a newer release without downloading anything.</summary>
+    private async void OnCheckForUpdates(object sender, RoutedEventArgs e)
+    {
+        _vm.UpdateControlsEnabled = false;
+        _vm.UpdateStatusText = "Checking for updates…";
+        try
+        {
+            var info = await UpdateService.CheckAsync();
+            App.Current.Settings.SetLastUpdateCheckDate(UsageRepository.LocalDate(DateTime.Now));
+
+            if (info is null)
+                _vm.UpdateStatusText = "Couldn't check for updates. Please try again later.";
+            else if (UpdateService.IsUpdateAvailable(info))
+                _vm.UpdateStatusText = $"Update available: {info.Tag} (you have v{UpdateService.CurrentVersion.ToString(3)}). " +
+                                       "Click \"Update Now\" to install.";
+            else
+                _vm.UpdateStatusText = $"You're up to date (v{UpdateService.CurrentVersion.ToString(3)}).";
+        }
+        finally
+        {
+            _vm.UpdateControlsEnabled = true;
+        }
+    }
+
+    /// <summary>Checks, downloads, and installs the latest release, then restarts the app.</summary>
+    private async void OnUpdateNow(object sender, RoutedEventArgs e)
+    {
+        _vm.UpdateControlsEnabled = false;
+        _vm.UpdateStatusText = "Checking for updates…";
+        try
+        {
+            var info = await UpdateService.CheckAsync();
+            App.Current.Settings.SetLastUpdateCheckDate(UsageRepository.LocalDate(DateTime.Now));
+
+            if (info is null)
+            {
+                _vm.UpdateStatusText = "Couldn't check for updates. Please try again later.";
+                return;
+            }
+            if (!UpdateService.IsUpdateAvailable(info))
+            {
+                _vm.UpdateStatusText = $"You're already up to date (v{UpdateService.CurrentVersion.ToString(3)}).";
+                return;
+            }
+
+            _vm.UpdateStatusText = $"Downloading {info.Tag}…";
+            _vm.DownloadProgress = 0;
+            _vm.IsDownloading = true;
+            var progress = new Progress<double>(p => _vm.DownloadProgress = p);
+
+            string newExe = await UpdateService.DownloadAsync(info, progress);
+
+            _vm.UpdateStatusText = "Installing update and restarting…";
+            App.Current.ApplyUpdateAndRestart(newExe);
+        }
+        catch (Exception ex)
+        {
+            _vm.IsDownloading = false;
+            _vm.UpdateStatusText = $"Update failed: {ex.Message}";
+        }
+        finally
+        {
+            _vm.UpdateControlsEnabled = true;
+        }
     }
 }

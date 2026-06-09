@@ -5,15 +5,19 @@ Windows app, so contributing is straightforward.
 
 ## Ground rules
 
-ProgramClock is, by design, **entirely local and privacy-preserving**. Please keep it
-that way. Contributions must not:
+ProgramClock is, by design, **privacy-preserving**: your usage data stays on your
+machine. Please keep it that way. Contributions must not:
 
-- Add any network calls (HTTP, sockets, telemetry, analytics, crash reporting, etc.).
+- Add any telemetry, analytics, crash reporting, or ads, or transmit anything about how
+  the user uses their computer. The **only** permitted network use is the existing opt-in
+  update checker (HTTPS to the public GitHub Releases API, off by default), which sends no
+  user data. Don't add other network calls.
 - Modify, inject input into, or send window messages to other processes. All
   interaction with other apps must remain **read-only observation**.
 - Persist anything outside the local SQLite database
   (`%LOCALAPPDATA%\ProgramClock\programclock.db`) and the optional autostart registry
-  key — no writing files elsewhere, no cloud sync.
+  key — no writing files elsewhere, no cloud sync. (The updater staging the new build in
+  the temp folder is the one exception.)
 
 PRs that cross those lines won't be merged.
 
@@ -47,6 +51,7 @@ ProgramClock/
   Tracking/     Foreground/process probes, the UsageTracker engine, browser/script helpers
   Data/         SQLite Database, repositories (usage, settings, categories, blocklist), models
   Startup/      Autostart (HKCU Run key) toggle
+  Update/       Opt-in GitHub-release update checker/downloader (the only network code)
   Tray/         NotifyIcon + context menu
   UI/           MainWindow (dashboard) + DashboardViewModel + theme resources
   App.xaml(.cs) Startup: single-instance, DB init, start tracker, tray icon, hidden start
