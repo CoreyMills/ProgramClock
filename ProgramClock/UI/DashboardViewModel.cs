@@ -6,6 +6,8 @@ using System.Windows;
 using System.Windows.Threading;
 using ProgramClock.Data;
 using ProgramClock.Tracking;
+using ProgramClock.UI.Charts;
+using Brush = System.Windows.Media.Brush;
 
 namespace ProgramClock.UI;
 
@@ -316,6 +318,36 @@ public sealed class AppCategoryItemVm : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
 }
 
+/// <summary>How the dashboard data is visualized. Table is the default; the others are hand-drawn
+/// charts. Only the selected view's data is ever shaped (see <see cref="DashboardViewModel.BuildChartData"/>).</summary>
+public enum DashboardView { Table, Bar, Donut, Trend }
+
+/// <summary>One app's slice within a category, for the bar segments and the donut's inner ring.</summary>
+public sealed record AppSlice(string DisplayName, long Value, Brush Color, double Percent);
+
+/// <summary>A category and its apps, ranked by value, for the hierarchical bar/donut charts.</summary>
+public sealed class CategorySlice
+{
+    public required string Name { get; init; }
+    public long Value { get; init; }
+    public required Brush Color { get; init; }
+    public double Percent { get; init; }
+    public IReadOnlyList<AppSlice> Apps { get; init; } = Array.Empty<AppSlice>();
+}
+
+/// <summary>One day's bar in the daily-trend chart.</summary>
+public sealed record DayBar(string Label, long Value);
+
+/// <summary>An immutable snapshot the chart controls render. Only the fields for the active view are
+/// populated; <see cref="Categories"/> serves bar+donut, <see cref="Days"/> serves the trend.</summary>
+public sealed class ChartSnapshot
+{
+    public IReadOnlyList<CategorySlice> Categories { get; init; } = Array.Empty<CategorySlice>();
+    public IReadOnlyList<DayBar> Days { get; init; } = Array.Empty<DayBar>();
+    public long Max { get; init; }      // largest single value, for bar/trend scaling
+    public long Total { get; init; }    // sum of all values, for donut percentages
+}
+
 public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly UsageRepository _usage;
@@ -349,6 +381,70 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         get => _selectedRange;
         set { if (_selectedRange != value) { _selectedRange = value; OnChanged(); Reload(); } }
     }
+
+    public Array ViewModes => Enum.GetValues<DashboardView>();
+
+    private DashboardView _selectedViewMode = DashboardView.Table;
+    /// <summary>The selected visualizer. Changing it rebuilds only the newly-active view's data and
+    /// flips which content control is visible; non-selected charts do no work.</summary>
+    public DashboardView SelectedViewMode
+    {
+        get => _selectedViewMode;
+        set
+        {
+            if (_selectedViewMode == value) return;
+            _selectedViewMode = value;
+            OnChanged();
+            OnChanged(nameof(TableVisibility));
+            OnChanged(nameof(BarVisibility));
+            OnChanged(nameof(DonutVisibility));
+            OnChanged(nameof(TrendVisibility));
+            OnChanged(nameof(MetricToggleVisibility));
+            BuildChartData();
+        }
+    }
+
+    public Visibility TableVisibility => _selectedViewMode == DashboardView.Table ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility BarVisibility => _selectedViewMode == DashboardView.Bar ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility DonutVisibility => _selectedViewMode == DashboardView.Donut ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility TrendVisibility => _selectedViewMode == DashboardView.Trend ? Visibility.Visible : Visibility.Collapsed;
+
+    private bool _showFocused = true;
+    /// <summary>Which metric the charts visualize: focused time when true, running time when false.</summary>
+    public bool ShowFocused
+    {
+        get => _showFocused;
+        set { if (_showFocused != value) { _showFocused = value; OnChanged(); OnChanged(nameof(MetricLabel)); BuildChartData(); } }
+    }
+
+    public string MetricLabel => ShowFocused ? "Focused" : "Running";
+
+    /// <summary>The Focused/Running toggle is only meaningful for the charts (each shows one metric);
+    /// the Table already shows both columns, so it's hidden there.</summary>
+    public Visibility MetricToggleVisibility =>
+        _selectedViewMode == DashboardView.Table ? Visibility.Collapsed : Visibility.Visible;
+
+    private ChartSnapshot? _chartData;
+    /// <summary>The current chart snapshot for the active view (null for Table or empty ranges).</summary>
+    public ChartSnapshot? ChartData
+    {
+        get => _chartData;
+        private set { _chartData = value; OnChanged(); }
+    }
+
+    private int _tooltipDelayMs;
+    /// <summary>Pointer-rest delay (ms) before a chart section's tooltip appears. Read by the chart
+    /// controls; refreshed from settings via <see cref="SetTooltipDelayMs"/> when the user saves.</summary>
+    public int TooltipDelayMs => _tooltipDelayMs;
+
+    public void SetTooltipDelayMs(int ms) => _tooltipDelayMs = Math.Max(0, ms);
+
+    private bool _growOnHover = true;
+    /// <summary>Whether the hovered chart section grows/pops out. Read by the chart controls; refreshed
+    /// from settings via <see cref="SetGrowOnHover"/> when the user saves.</summary>
+    public bool GrowOnHover => _growOnHover;
+
+    public void SetGrowOnHover(bool on) => _growOnHover = on;
 
     private DashboardPage _page = DashboardPage.Dashboard;
     public DashboardPage Page
@@ -423,7 +519,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     private string _focusLabel = "Total Focused: ";
     public string FocusLabel { get => _focusLabel; private set { if (_focusLabel != value) { _focusLabel = value; OnChanged(); } } }
 
-    private string _runLabel = "Total Running: ";
+    private string _runLabel = "Longest Running: ";
     public string RunLabel { get => _runLabel; private set { if (_runLabel != value) { _runLabel = value; OnChanged(); } } }
 
     private bool _isUserIdle;
@@ -550,6 +646,8 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         _settings = settings;
         _categories = categories;
         _labels = _settings.GetEfficiencySettings();
+        _tooltipDelayMs = _settings.GetTooltipDelayMs();
+        _growOnHover = _settings.GetGrowOnHover();
         RebuildTagChoices();
         _dispatcher = Dispatcher.CurrentDispatcher;
         _wheelTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
@@ -693,14 +791,119 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
             row.UpdateSites(sitesByExe.TryGetValue(kv.Key, out var hosts)
                 ? hosts
                 : EmptySites);
-            totalRun += kv.Value.Run;
+            // Running time overlaps across apps in wall-clock, so summing it is meaningless; the
+            // longest-running app best represents elapsed time. Focused time doesn't overlap, so it
+            // still totals.
+            totalRun = Math.Max(totalRun, kv.Value.Run);
             totalFocus += kv.Value.Focus;
         }
         _totalRunMs = totalRun;
         _totalFocusMs = totalFocus;
         RefreshTotalsDisplay();
         UpdateEfficiency(wanted.Values, totalFocus);
+
+        // Cache the per-app snapshot so the (lazy, view-gated) chart build can reuse it without
+        // re-querying, then refresh whichever chart is active.
+        _lastWanted = wanted;
+        BuildChartData();
     }
+
+    // The latest per-app merged data from Reload, reused by BuildChartData on metric/view changes.
+    private Dictionary<string, (string Name, long Run, long Focus, string Category, AppTag Tag)> _lastWanted =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Shape the chart snapshot for the <em>currently selected</em> view only. Table does no
+    /// work and clears the snapshot; Bar/Donut share the category/app shaping; Trend is the only view
+    /// that queries per-day data. Nothing is computed for inactive visualizers.</summary>
+    private void BuildChartData()
+    {
+        ChartData = _selectedViewMode switch
+        {
+            DashboardView.Bar or DashboardView.Donut => BuildCategorySnapshot(),
+            DashboardView.Trend => BuildTrendSnapshot(),
+            _ => null, // Table: no chart work
+        };
+    }
+
+    private ChartSnapshot BuildCategorySnapshot()
+    {
+        long Metric((string Name, long Run, long Focus, string Category, AppTag Tag) v) =>
+            ShowFocused ? v.Focus : v.Run;
+
+        var groups = _lastWanted.Values
+            .Select(v => (v.Name, Value: Metric(v), v.Category))
+            .Where(x => x.Value > 0)
+            .GroupBy(x => x.Category, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Category: g.Key,
+                          Apps: g.OrderByDescending(a => a.Value).ToList(),
+                          Total: g.Sum(a => a.Value)))
+            .OrderByDescending(g => g.Total)
+            .ToList();
+
+        long total = groups.Sum(g => g.Total);
+        long max = groups.Count > 0 ? groups.Max(g => g.Total) : 0;
+
+        var cats = new List<CategorySlice>(groups.Count);
+        for (int ci = 0; ci < groups.Count; ci++)
+        {
+            var g = groups[ci];
+            var apps = new List<AppSlice>(g.Apps.Count);
+            for (int ai = 0; ai < g.Apps.Count; ai++)
+            {
+                var a = g.Apps[ai];
+                apps.Add(new AppSlice(a.Name, a.Value,
+                    ChartPalette.AppShade(ci, ai, g.Apps.Count),
+                    g.Total > 0 ? (double)a.Value / g.Total : 0));
+            }
+            cats.Add(new CategorySlice
+            {
+                Name = g.Category,
+                Value = g.Total,
+                Color = ChartPalette.Category(ci),
+                Percent = total > 0 ? (double)g.Total / total : 0,
+                Apps = apps,
+            });
+        }
+        return new ChartSnapshot { Categories = cats, Max = max, Total = total };
+    }
+
+    private ChartSnapshot BuildTrendSnapshot()
+    {
+        var byDate = new Dictionary<string, long>();
+        foreach (var d in _usage.QueryDaily(SelectedRange))
+            byDate[d.Date] = ShowFocused ? d.FocusMs : d.RunMs;
+
+        // Fold today's unflushed pending onto today's bar so it tracks live. Focused pending sums
+        // across apps; running pending takes the longest app (never summed — run time overlaps).
+        var pending = _tracker.SnapshotPending();
+        long pend = ShowFocused
+            ? pending.Sum(p => p.FocusMs)
+            : (pending.Count > 0 ? pending.Max(p => p.RunMs) : 0);
+        if (pend > 0)
+        {
+            var today = UsageRepository.LocalDate(DateTime.Now);
+            long cur = byDate.TryGetValue(today, out var c) ? c : 0;
+            // Focused accumulates onto today's total; running takes whichever is longer.
+            byDate[today] = ShowFocused ? cur + pend : Math.Max(cur, pend);
+        }
+
+        var days = new List<DayBar>(byDate.Count);
+        long max = 0, total = 0;
+        foreach (var kv in byDate.OrderBy(k => k.Key, StringComparer.Ordinal))
+        {
+            days.Add(new DayBar(FormatDayLabel(kv.Key), kv.Value));
+            max = Math.Max(max, kv.Value);
+            total += kv.Value;
+        }
+        return new ChartSnapshot { Days = days, Max = max, Total = total };
+    }
+
+    // "yyyy-MM-dd" -> short "MMM d" label for trend bars; falls back to the raw string if unparseable.
+    private static string FormatDayLabel(string isoDate) =>
+        DateTime.TryParseExact(isoDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+            DateTimeStyles.None, out var dt)
+            ? dt.ToString("MMM d", CultureInfo.CurrentCulture)
+            : isoDate;
 
     /// <summary>Called by the dashboard when the grid selection changes. With <see cref="SelectionSummaryMin"/>
     /// or more rows selected, the header totals switch to the combined times of just those rows;
@@ -721,18 +924,19 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         var selected = _selectedRows.Where(Rows.Contains).ToList();
         if (selected.Count >= SelectionSummaryMin)
         {
+            // Focused time sums; running time takes the longest of the selected apps (it overlaps).
             long run = 0, focus = 0;
-            foreach (var r in selected) { run += r.RunMs; focus += r.FocusMs; }
+            foreach (var r in selected) { run = Math.Max(run, r.RunMs); focus += r.FocusMs; }
             TotalRun = TimeFormat.Humanize(run);
             TotalFocus = TimeFormat.Humanize(focus);
-            RunLabel = "Selected Running: ";
+            RunLabel = "Longest Running: ";
             FocusLabel = "Selected Focused: ";
         }
         else
         {
             TotalRun = TimeFormat.Humanize(_totalRunMs);
             TotalFocus = TimeFormat.Humanize(_totalFocusMs);
-            RunLabel = "Total Running: ";
+            RunLabel = "Longest Running: ";
             FocusLabel = "Total Focused: ";
         }
     }

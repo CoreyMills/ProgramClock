@@ -372,6 +372,8 @@ public partial class MainWindow : Window
         DayEndBox.Text = s.GetDayEnd();
         LockStopCheck.IsChecked = s.GetLockStopEnabled();
         LockStopMinutesBox.Text = s.GetLockStopMinutes().ToString();
+        TooltipDelayBox.Text = (s.GetTooltipDelayMs() / 1000.0).ToString("0.##", CultureInfo.InvariantCulture);
+        GrowOnHoverCheck.IsChecked = s.GetGrowOnHover();
         StatusText.Text = "";
     }
 
@@ -485,6 +487,10 @@ public partial class MainWindow : Window
     }
 
     private void OnManualRefresh(object sender, RoutedEventArgs e) => _vm.ForceRefresh();
+
+    // Flip the charts between focused and running time. (A subtle-styled button rather than a raw
+    // ToggleButton so it matches the other header buttons.)
+    private void OnToggleMetric(object sender, RoutedEventArgs e) => _vm.ShowFocused = !_vm.ShowFocused;
 
     // Capture-on-open: ContextMenuOpening fires reliably every open with the element under the cursor,
     // unlike reading the menu's PlacementTarget/Parent at click time. Explorer-style: right-clicking a
@@ -709,6 +715,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (!double.TryParse(TooltipDelayBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var tooltipSeconds)
+            || tooltipSeconds < 0)
+        {
+            StatusText.Foreground = (Brush)FindResource("AccentBrush");
+            StatusText.Text = "Enter the chart tooltip delay as a number of seconds (0 or more).";
+            return;
+        }
+        int tooltipDelay = (int)Math.Round(tooltipSeconds * 1000);
+
         if (!_vm.TrySaveEfficiencyLabels(out var labelError))
         {
             StatusText.Foreground = (Brush)FindResource("AccentBrush");
@@ -759,6 +774,13 @@ public partial class MainWindow : Window
 
         s.SetLockStopMinutes(lockMinutes);
         tracker.SetLockStopMinutes(lockMinutes);
+
+        s.SetTooltipDelayMs(tooltipDelay);
+        _vm.SetTooltipDelayMs(tooltipDelay);
+
+        var growOnHover = GrowOnHoverCheck.IsChecked == true;
+        s.SetGrowOnHover(growOnHover);
+        _vm.SetGrowOnHover(growOnHover);
 
         _vm.ApplyRefreshSettings();
         _vm.Page = DashboardPage.Dashboard;

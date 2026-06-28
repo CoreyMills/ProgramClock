@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:ProgramClock.UI"
         xmlns:ctrl="clr-namespace:ProgramClock.UI.Controls"
+        xmlns:charts="clr-namespace:ProgramClock.UI.Charts"
         Title="ProgramClock" MinHeight="320" MinWidth="480"
         Icon="/app.ico"
         Background="{DynamicResource WindowBackgroundBrush}"
@@ -61,8 +62,12 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="{Binding FocusLabel}" FontWeight="Bold" />
                     <TextBlock Text="{Binding TotalFocus}" Margin="0,0,16,0" />
                     <TextBlock Text="{Binding RunLabel}" FontWeight="Bold" />
@@ -106,21 +111,43 @@
                     </Border>
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <!-- Row 0 (right): action buttons. All use the subtle style except Settings, which is
+                     the single accent/red primary button. -->
+                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="Refresh" Style="{StaticResource SubtleButton}"
+                            Visibility="{Binding ManualRefreshVisibility}"
+                            Click="OnManualRefresh" Margin="0,0,8,0" />
+                    <Button Content="Categories" Style="{StaticResource SubtleButton}"
+                            Click="OnOpenCategories" Margin="0,0,8,0" />
+                    <Button Content="Settings" Click="OnOpenSettings" />
+                </StackPanel>
+
+                <!-- Row 1: data controls (range + view dropdowns and the chart metric toggle). The
+                     metric button is hidden for the Table view, which already shows both columns. -->
+                <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal"
+                            VerticalAlignment="Center" Margin="0,10,0,0">
                     <TextBlock Text="Range:" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <ComboBox ItemsSource="{Binding Ranges}"
                               SelectedItem="{Binding SelectedRange}"
                               Width="110" VerticalAlignment="Center" />
-                    <Button Content="Refresh" Style="{StaticResource SubtleButton}"
-                            Visibility="{Binding ManualRefreshVisibility}"
-                            Click="OnManualRefresh" Margin="8,0,0,0" />
-                    <Button Content="Categories" Style="{StaticResource SubtleButton}"
-                            Click="OnOpenCategories" Margin="8,0,0,0" />
-                    <Button Content="Settings" Click="OnOpenSettings" Margin="8,0,0,0" />
+                    <TextBlock Text="View:" VerticalAlignment="Center" Margin="16,0,6,0" />
+                    <ComboBox ItemsSource="{Binding ViewModes}"
+                              SelectedItem="{Binding SelectedViewMode}"
+                              Width="90" VerticalAlignment="Center" />
+                    <Button Content="{Binding MetricLabel}" Style="{StaticResource SubtleButton}"
+                            Visibility="{Binding MetricToggleVisibility}"
+                            Click="OnToggleMetric" Width="90" Margin="16,0,0,0"
+                            ToolTip="Switch charts between focused and running time" />
                 </StackPanel>
             </Grid>
 
+            <!-- Dashboard content: the table plus the chart views overlaid, one visible at a time per
+                 the View dropdown. The DataGrid stays a permanent (collapsed) child so its selection,
+                 sort, drag handlers and row details survive view switches; the charts only draw while
+                 visible (see ChartHost). -->
+            <Grid>
             <DataGrid x:Name="DashboardGrid"
+                      Visibility="{Binding TableVisibility}"
                       ItemsSource="{Binding Rows}"
                       ContextMenuOpening="OnRowContextMenuOpening"
                       Sorting="OnGridSorting"
@@ -307,6 +334,11 @@
                     </DataGridTextColumn>
                 </DataGrid.Columns>
             </DataGrid>
+
+                <charts:BarChartView   Visibility="{Binding BarVisibility}" />
+                <charts:DonutChartView Visibility="{Binding DonutVisibility}" />
+                <charts:TrendChartView Visibility="{Binding TrendVisibility}" />
+            </Grid>
         </DockPanel>
 
         <!-- ===== Settings view ===== -->
@@ -332,9 +364,6 @@
                                       Margin="0,0,0,16" />
 
                             <TextBlock Text="Accent colour" FontWeight="SemiBold" Margin="0,0,0,6" />
-                            <TextBlock Text="The highlight colour used for buttons, selected rows, the refresh rings and other accents. Red is the default; click the swatch to pick a colour or enter a hex value. Changes apply instantly."
-                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
-                                       TextWrapping="Wrap" Margin="0,0,0,8" />
                             <StackPanel Orientation="Horizontal">
                                 <Button x:Name="AccentSwatchButton" Style="{StaticResource Swatch}"
                                         Width="120" Height="28" Background="{DynamicResource AccentBrush}"
@@ -350,11 +379,11 @@
                                                       Margin="0,4,0,0" />
                                 </Popup>
                             </StackPanel>
+                            <TextBlock Text="The highlight colour used for buttons, selected rows, the refresh rings and other accents. Red is the default; click the swatch to pick a colour or enter a hex value. Changes apply instantly."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,6,0,0" />
 
                             <TextBlock Text="Main colour" FontWeight="SemiBold" Margin="0,20,0,6" />
-                            <TextBlock Text="The app background colour. Defaults to your Windows light/dark theme; click the swatch to pick a colour to override it (text, surfaces and borders adjust to match). Changes apply instantly."
-                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
-                                       TextWrapping="Wrap" Margin="0,0,0,8" />
                             <StackPanel Orientation="Horizontal">
                                 <Button x:Name="MainSwatchButton" Style="{StaticResource Swatch}"
                                         Width="120" Height="28" Background="{DynamicResource WindowBackgroundBrush}"
@@ -370,6 +399,9 @@
                                                       Margin="0,4,0,0" />
                                 </Popup>
                             </StackPanel>
+                            <TextBlock Text="The app background colour. Defaults to your Windows light/dark theme; click the swatch to pick a colour to override it (text, surfaces and borders adjust to match). Changes apply instantly."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,6,0,0" />
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -398,10 +430,7 @@
                             </StackPanel>
 
                             <TextBlock Text="Day hours" FontWeight="SemiBold" Margin="0,8,0,6" />
-                            <TextBlock Text="Running time only starts counting once you first use the PC each day, so it isn't logged while you're away overnight. Set your normal hours below (24-hour time, e.g. 08:00)."
-                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
-                                       TextWrapping="Wrap" Margin="0,0,0,8" />
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,6">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="90" />
                                     <ColumnDefinition Width="Auto" />
@@ -421,6 +450,9 @@
                                          Margin="0,2" HorizontalAlignment="Left"
                                          ToolTip="24-hour time, e.g. 22:00" />
                             </Grid>
+                            <TextBlock Text="Running time only starts counting once you first use the PC each day, so it isn't logged while you're away overnight. Use 24-hour time (e.g. 08:00)."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,12" />
 
                             <CheckBox x:Name="LockStopCheck"
                                       Content="Stop running time when the PC is locked outside these hours"
@@ -438,15 +470,37 @@
                     </ScrollViewer>
                 </TabItem>
 
+                <!-- ===== Visualizers ===== -->
+                <TabItem Header="Visualizers">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="Charts" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <CheckBox x:Name="GrowOnHoverCheck"
+                                      Content="Grow the hovered section in charts"
+                                      Margin="0,0,0,4" />
+                            <TextBlock Text="When on, the donut section under the pointer grows slightly and pops outward."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,14" />
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <TextBlock Text="Show chart tooltip after" VerticalAlignment="Center"
+                                           Margin="0,0,8,0" />
+                                <TextBox x:Name="TooltipDelayBox" Width="70" />
+                                <TextBlock Text="seconds" VerticalAlignment="Center" Margin="8,0,0,0" />
+                            </StackPanel>
+                            <TextBlock Text="How long to rest the pointer on a chart section before its describing tooltip appears."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,4" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
                 <!-- ===== Shortcuts ===== -->
                 <TabItem Header="Shortcuts">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
                             <TextBlock Text="Keyboard shortcuts" FontWeight="SemiBold" Margin="0,0,0,6" />
-                            <TextBlock Text="Click a box and press a key to bind it. The shortcut applies to the current selection (apps and websites) while the dashboard list has focus. Clear a box to unbind it."
-                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
-                                       TextWrapping="Wrap" Margin="0,0,0,6" />
-                            <Grid Margin="0,0,0,16">
+                            <Grid Margin="0,0,0,6">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="110" />
                                     <ColumnDefinition Width="130" />
@@ -473,6 +527,9 @@
                                         Style="{StaticResource SubtleButton}" Padding="6,2"
                                         Margin="8,2,0,2" Click="OnClearBlockHotkey" />
                             </Grid>
+                            <TextBlock Text="Click a box and press a key to bind it. The shortcut applies to the current selection (apps and websites) while the dashboard list has focus. Clear a box to unbind it."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,4" />
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -482,9 +539,6 @@
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
                             <TextBlock Text="Tags &amp; efficiency" FontWeight="SemiBold" Margin="0,0,0,6" />
-                            <TextBlock Text="Rename each tag and set how much its focused time counts toward the efficiency score (0 = ignored)."
-                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
-                                       TextWrapping="Wrap" Margin="0,0,0,6" />
                             <Grid Margin="0,0,0,2">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="110" />
@@ -513,11 +567,11 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+                            <TextBlock Text="Rename each tag and set how much its focused time counts toward the efficiency score (0 = ignored)."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,16" />
 
                             <TextBlock Text="Efficiency ratings" FontWeight="SemiBold" Margin="0,0,0,6" />
-                            <TextBlock Text="Rename each rating and set the lowest efficiency percentage that earns it. Add or remove ratings for more or less detail. A result stays at the rating below until its score clears the next threshold; thresholds must increase, and the lowest rating is the floor (treated as 0%)."
-                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
-                                       TextWrapping="Wrap" Margin="0,0,0,6" />
                             <Grid Margin="0,0,0,2">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -553,7 +607,10 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <Button Content="Add rating" Click="OnAddRating" HorizontalAlignment="Left"
-                                    Style="{StaticResource SubtleButton}" Padding="10,4" Margin="0,0,0,16" />
+                                    Style="{StaticResource SubtleButton}" Padding="10,4" Margin="0,0,0,6" />
+                            <TextBlock Text="Rename each rating and set the lowest efficiency percentage that earns it. Add or remove ratings for more or less detail. A result stays at the rating below until its score clears the next threshold; thresholds must increase, and the lowest rating is the floor (treated as 0%)."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,4" />
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -563,9 +620,6 @@
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
                             <TextBlock Text="Blocked apps" FontWeight="SemiBold" Margin="0,0,0,6" />
-                            <TextBlock Text="These apps are not tracked. Unblock to detect them again."
-                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
-                                       TextWrapping="Wrap" Margin="0,0,0,6" />
                             <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                                     CornerRadius="4" Padding="4" MaxHeight="160" MinHeight="44">
                                 <Grid>
@@ -592,11 +646,11 @@
                                                Visibility="{Binding NoBlockedAppsVisibility}" />
                                 </Grid>
                             </Border>
+                            <TextBlock Text="These apps are not tracked. Unblock to detect them again."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,6,0,0" />
 
                             <TextBlock Text="Blocked websites" FontWeight="SemiBold" Margin="0,16,0,6" />
-                            <TextBlock Text="These websites are not tracked under any browser. Unblock to track them again."
-                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
-                                       TextWrapping="Wrap" Margin="0,0,0,6" />
                             <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                                     CornerRadius="4" Padding="4" MaxHeight="160" MinHeight="44">
                                 <Grid>
@@ -623,6 +677,9 @@
                                                Visibility="{Binding NoBlockedSitesVisibility}" />
                                 </Grid>
                             </Border>
+                            <TextBlock Text="These websites are not tracked under any browser. Unblock to track them again."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,6,0,0" />
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>

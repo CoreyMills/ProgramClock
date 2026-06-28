@@ -237,9 +237,11 @@ public sealed class UsageRepository
         lock (_conn)
         {
             using var cmd = _conn.CreateCommand();
+            // Running time overlaps in wall-clock, so it's never summed: an app's running figure for
+            // the range is its longest single day (MAX), while focused time accumulates (SUM).
             cmd.CommandText =
                 "SELECT a.exe_name, COALESCE(a.display_name, a.exe_name) AS name, " +
-                "SUM(u.run_ms) AS run, SUM(u.focus_ms) AS focus, " +
+                "MAX(u.run_ms) AS run, SUM(u.focus_ms) AS focus, " +
                 "COALESCE(c.name, 'Uncategorized') AS category, " +
                 "COALESCE(a.tag, 'Other') AS tag " +
                 "FROM usage_daily u JOIN apps a ON a.id = u.app_id " +
@@ -264,6 +266,37 @@ public sealed class UsageRepository
                     Tag = r.GetString(5).ParseTag(),
                 });
             }
+            return rows;
+        }
+    }
+
+    /// <summary>Per-day totals (run/focused ms summed across all apps) over the range, oldest first.
+    /// Feeds the daily-trend visualizer.</summary>
+    public List<DailyRow> QueryDaily(DateRange range)
+    {
+        var (from, to) = RangeBounds(range);
+        lock (_conn)
+        {
+            using var cmd = _conn.CreateCommand();
+            // Per day: running takes the longest single app (MAX, never summed across apps because run
+            // time overlaps in wall-clock); focused time sums.
+            cmd.CommandText =
+                "SELECT u.date, MAX(u.run_ms) AS run, SUM(u.focus_ms) AS focus " +
+                "FROM usage_daily u " +
+                "WHERE ($from IS NULL OR u.date >= $from) AND ($to IS NULL OR u.date <= $to) " +
+                "GROUP BY u.date ORDER BY u.date;";
+            cmd.Parameters.AddWithValue("$from", (object?)from ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$to", (object?)to ?? DBNull.Value);
+
+            var rows = new List<DailyRow>();
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                rows.Add(new DailyRow
+                {
+                    Date = r.GetString(0),
+                    RunMs = r.IsDBNull(1) ? 0 : r.GetInt64(1),
+                    FocusMs = r.IsDBNull(2) ? 0 : r.GetInt64(2),
+                });
             return rows;
         }
     }

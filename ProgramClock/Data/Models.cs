@@ -74,3 +74,12 @@ public enum DateRange
     Month,
     All,
 }
+
+/// <summary>Total run/focused time for a single local day, summed across all apps. Feeds the
+/// daily-trend visualizer.</summary>
+public sealed class DailyRow
+{
+    public required string Date { get; init; }   // local yyyy-MM-dd
+    public long RunMs { get; init; }
+    public long FocusMs { get; init; }
+}

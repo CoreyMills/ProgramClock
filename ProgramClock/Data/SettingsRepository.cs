@@ -154,6 +154,21 @@ public sealed class SettingsRepository
     }
     public void SetLockStopMinutes(int minutes) => Set(LockStopMinutesKey, Math.Max(0, minutes).ToString());
 
+    // How long the pointer must rest on a chart section before its describing tooltip appears (ms).
+    public const string TooltipDelayMsKey = "tooltip_delay_ms";
+    public const int DefaultTooltipDelayMs = 250;
+    public int GetTooltipDelayMs()
+    {
+        var raw = Get(TooltipDelayMsKey);
+        return int.TryParse(raw, out var v) && v >= 0 ? v : DefaultTooltipDelayMs;
+    }
+    public void SetTooltipDelayMs(int ms) => Set(TooltipDelayMsKey, Math.Max(0, ms).ToString());
+
+    // Whether the hovered chart section grows/pops out. Defaults on.
+    public const string GrowOnHoverKey = "grow_on_hover";
+    public bool GetGrowOnHover() => (Get(GrowOnHoverKey) ?? "1") == "1";
+    public void SetGrowOnHover(bool on) => Set(GrowOnHoverKey, on ? "1" : "0");
+
     // Personalizable tag labels/weights (keyed per enum value, e.g. "tag_name_Main") plus the
     // user-defined efficiency ratings (stored as a JSON list under one key).
     private const string TagNamePrefix = "tag_name_";
