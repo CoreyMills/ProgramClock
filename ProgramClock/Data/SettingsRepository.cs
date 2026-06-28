@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
 namespace ProgramClock.Data;
@@ -126,13 +127,45 @@ public sealed class SettingsRepository
     public string GetMainColor() => Get(MainColorKey) ?? "";
     public void SetMainColor(string hex) => Set(MainColorKey, hex.Trim());
 
-    // Personalizable tag/efficiency labels and weights. Keyed per enum value, e.g. "tag_name_Main".
+    // The user's normal day window (local 24-hour "HH:mm"). Running time only starts counting once
+    // the user first focuses an app each day; outside this window, a long lock stops it (see below).
+    public const string DayStartKey = "day_start_time";
+    public const string DefaultDayStart = "08:00";
+    public string GetDayStart() => Get(DayStartKey) ?? DefaultDayStart;
+    public void SetDayStart(string hhmm) => Set(DayStartKey, hhmm.Trim());
+
+    public const string DayEndKey = "day_end_time";
+    public const string DefaultDayEnd = "22:00";
+    public string GetDayEnd() => Get(DayEndKey) ?? DefaultDayEnd;
+    public void SetDayEnd(string hhmm) => Set(DayEndKey, hhmm.Trim());
+
+    // When enabled, running time stops accruing once the PC has been locked for at least this many
+    // minutes AND the current time is outside the day window. Unlocking resumes it immediately.
+    public const string LockStopEnabledKey = "lock_stop_enabled";
+    public bool GetLockStopEnabled() => (Get(LockStopEnabledKey) ?? "1") == "1";
+    public void SetLockStopEnabled(bool on) => Set(LockStopEnabledKey, on ? "1" : "0");
+
+    public const string LockStopMinutesKey = "lock_stop_minutes";
+    public const int DefaultLockStopMinutes = 15;
+    public int GetLockStopMinutes()
+    {
+        var raw = Get(LockStopMinutesKey);
+        return int.TryParse(raw, out var v) && v >= 0 ? v : DefaultLockStopMinutes;
+    }
+    public void SetLockStopMinutes(int minutes) => Set(LockStopMinutesKey, Math.Max(0, minutes).ToString());
+
+    // Personalizable tag labels/weights (keyed per enum value, e.g. "tag_name_Main") plus the
+    // user-defined efficiency ratings (stored as a JSON list under one key).
     private const string TagNamePrefix = "tag_name_";
     private const string TagWeightPrefix = "tag_weight_";
-    private const string TierNamePrefix = "tier_name_";
+    private const string EfficiencyRatingsKey = "efficiency_ratings";
 
-    /// <summary>Load the user's tag/efficiency labels and weights, falling back to the built-in
-    /// defaults for any value the user hasn't customised.</summary>
+    // Pre-list (per-tier) keys, read only when migrating an older database to the JSON ratings list.
+    private const string TierNamePrefix = "tier_name_";
+    private const string TierThresholdPrefix = "tier_threshold_";
+
+    /// <summary>Load the user's tag labels/weights and efficiency ratings, falling back to the
+    /// built-in defaults for anything the user hasn't customised.</summary>
     public EfficiencySettings GetEfficiencySettings()
     {
         var names = new Dictionary<AppTag, string>();
@@ -147,25 +180,61 @@ public sealed class SettingsRepository
                     : EfficiencySettings.DefaultWeight(t);
         }
 
-        var tiers = new Dictionary<EfficiencyTier, string>();
-        foreach (var tier in EfficiencySettings.NamedTiers)
-            tiers[tier] = Get(TierNamePrefix + tier) ?? EfficiencySettings.DefaultTierName(tier);
-
-        return new EfficiencySettings(names, weights, tiers);
+        return new EfficiencySettings(names, weights, LoadRatings());
     }
 
     public void SaveEfficiencySettings(
         IReadOnlyDictionary<AppTag, string> tagNames,
         IReadOnlyDictionary<AppTag, double> tagWeights,
-        IReadOnlyDictionary<EfficiencyTier, string> tierNames)
+        IReadOnlyList<EfficiencyRating> ratings)
     {
         foreach (var t in EfficiencySettings.Tags)
         {
             Set(TagNamePrefix + t, tagNames[t]);
             Set(TagWeightPrefix + t, tagWeights[t].ToString(CultureInfo.InvariantCulture));
         }
-        foreach (var tier in EfficiencySettings.NamedTiers)
-            Set(TierNamePrefix + tier, tierNames[tier]);
+        Set(EfficiencyRatingsKey, JsonSerializer.Serialize(ratings));
+    }
+
+    private IReadOnlyList<EfficiencyRating> LoadRatings()
+    {
+        var raw = Get(EfficiencyRatingsKey);
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            try
+            {
+                var list = JsonSerializer.Deserialize<List<EfficiencyRating>>(raw);
+                if (list is { Count: > 0 }) return list;
+            }
+            catch { /* corrupt value: fall back to migration/defaults below */ }
+        }
+        return MigrateLegacyRatings();
+    }
+
+    // Build the ratings list from the pre-list per-tier settings so any earlier custom names or
+    // thresholds survive, falling back to the built-in defaults for anything not previously set.
+    private IReadOnlyList<EfficiencyRating> MigrateLegacyRatings()
+    {
+        var legacy = new (string Key, string Name, double Threshold)[]
+        {
+            ("Poor", "Poor", 0.0),
+            ("Fair", "Fair", 0.40),
+            ("Good", "Good", 0.60),
+            ("Excellent", "Excellent", 0.80),
+        };
+
+        var list = new List<EfficiencyRating>();
+        foreach (var (key, defName, defThreshold) in legacy)
+        {
+            var name = Get(TierNamePrefix + key) ?? defName;
+            var rawThreshold = Get(TierThresholdPrefix + key);
+            var threshold =
+                double.TryParse(rawThreshold, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v >= 0
+                    ? v
+                    : defThreshold;
+            list.Add(new EfficiencyRating(name, threshold));
+        }
+        return list;
     }
 
     public const string WindowBoundsKey = "window_bounds";

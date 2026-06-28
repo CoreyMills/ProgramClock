@@ -63,9 +63,9 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="Total Focused: " FontWeight="Bold" />
+                    <TextBlock Text="{Binding FocusLabel}" FontWeight="Bold" />
                     <TextBlock Text="{Binding TotalFocus}" Margin="0,0,16,0" />
-                    <TextBlock Text="Total Running: " FontWeight="Bold" />
+                    <TextBlock Text="{Binding RunLabel}" FontWeight="Bold" />
                     <TextBlock Text="{Binding TotalRun}" Margin="0,0,16,0" />
 
                     <Border CornerRadius="10" Padding="10,2" VerticalAlignment="Center">
@@ -89,16 +89,13 @@
                             <Style TargetType="Border">
                                 <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding EfficiencyTier}" Value="Excellent">
+                                    <DataTrigger Binding="{Binding EfficiencyLevel}" Value="High">
                                         <Setter Property="Background" Value="{DynamicResource ActiveBrush}" />
                                     </DataTrigger>
-                                    <DataTrigger Binding="{Binding EfficiencyTier}" Value="Good">
-                                        <Setter Property="Background" Value="{DynamicResource ActiveBrush}" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding EfficiencyTier}" Value="Fair">
+                                    <DataTrigger Binding="{Binding EfficiencyLevel}" Value="Mid">
                                         <Setter Property="Background" Value="{DynamicResource WarningBrush}" />
                                     </DataTrigger>
-                                    <DataTrigger Binding="{Binding EfficiencyTier}" Value="Poor">
+                                    <DataTrigger Binding="{Binding EfficiencyLevel}" Value="Low">
                                         <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
                                     </DataTrigger>
                                 </Style.Triggers>
@@ -127,6 +124,7 @@
                       ItemsSource="{Binding Rows}"
                       ContextMenuOpening="OnRowContextMenuOpening"
                       Sorting="OnGridSorting"
+                      SelectionChanged="OnGridSelectionChanged"
                       PreviewMouseLeftButtonDown="OnGridMouseDown"
                       PreviewMouseMove="OnGridMouseMove"
                       PreviewMouseLeftButtonUp="OnGridMouseUp"
@@ -398,6 +396,44 @@
                                 <TextBox x:Name="RunRefreshBox" Width="80" />
                                 <TextBlock Text="seconds" VerticalAlignment="Center" Margin="8,0,0,0" />
                             </StackPanel>
+
+                            <TextBlock Text="Day hours" FontWeight="SemiBold" Margin="0,8,0,6" />
+                            <TextBlock Text="Running time only starts counting once you first use the PC each day, so it isn't logged while you're away overnight. Set your normal hours below (24-hour time, e.g. 08:00)."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,8" />
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="90" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Day starts"
+                                           VerticalAlignment="Center" Margin="0,2" />
+                                <TextBox Grid.Row="0" Grid.Column="1" x:Name="DayStartBox" Width="80"
+                                         Margin="0,2" HorizontalAlignment="Left"
+                                         ToolTip="24-hour time, e.g. 08:00" />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Day ends"
+                                           VerticalAlignment="Center" Margin="0,2" />
+                                <TextBox Grid.Row="1" Grid.Column="1" x:Name="DayEndBox" Width="80"
+                                         Margin="0,2" HorizontalAlignment="Left"
+                                         ToolTip="24-hour time, e.g. 22:00" />
+                            </Grid>
+
+                            <CheckBox x:Name="LockStopCheck"
+                                      Content="Stop running time when the PC is locked outside these hours"
+                                      Margin="0,0,0,6" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <TextBlock Text="after being locked for" VerticalAlignment="Center"
+                                           Margin="0,0,8,0" />
+                                <TextBox x:Name="LockStopMinutesBox" Width="60" />
+                                <TextBlock Text="minutes" VerticalAlignment="Center" Margin="8,0,0,0" />
+                            </StackPanel>
+                            <TextBlock Text="Unlocking and resuming work outside these hours starts it counting again."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,4" />
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -478,22 +514,46 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
 
-                            <TextBlock Text="Efficiency rating names" FontWeight="SemiBold" Margin="0,0,0,6" />
-                            <ItemsControl ItemsSource="{Binding TierLabels}" Margin="0,0,0,16">
+                            <TextBlock Text="Efficiency ratings" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <TextBlock Text="Rename each rating and set the lowest efficiency percentage that earns it. Add or remove ratings for more or less detail. A result stays at the rating below until its score clears the next threshold; thresholds must increase, and the lowest rating is the floor (treated as 0%)."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,0,0,6" />
+                            <Grid Margin="0,0,0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="90" />
+                                    <ColumnDefinition Width="80" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Display name" Foreground="{DynamicResource SubtleBrush}" FontSize="11" />
+                                <TextBlock Grid.Column="1" Text="Min %" Foreground="{DynamicResource SubtleBrush}" FontSize="11" />
+                            </Grid>
+                            <ItemsControl ItemsSource="{Binding RatingLabels}" Margin="0,0,0,6">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <Grid Margin="0,2">
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="110" />
                                                 <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="90" />
+                                                <ColumnDefinition Width="80" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="{Binding TierKey}" VerticalAlignment="Center" />
-                                            <TextBox Grid.Column="1"
+                                            <TextBox Grid.Column="0" Margin="0,0,8,0"
                                                      Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                <TextBox Width="56"
+                                                         Text="{Binding ThresholdPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                         ToolTip="Lowest efficiency % that earns this rating" />
+                                                <TextBlock Text="%" VerticalAlignment="Center" Margin="4,0,0,0"
+                                                           Foreground="{DynamicResource SubtleBrush}" />
+                                            </StackPanel>
+                                            <Button Grid.Column="2" Content="Remove" Click="OnDeleteRating"
+                                                    Style="{StaticResource SubtleButton}" Padding="6,2"
+                                                    HorizontalAlignment="Left" ToolTip="Remove this rating" />
                                         </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+                            <Button Content="Add rating" Click="OnAddRating" HorizontalAlignment="Left"
+                                    Style="{StaticResource SubtleButton}" Padding="10,4" Margin="0,0,0,16" />
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -667,13 +727,22 @@
                 <DockPanel Grid.Column="1">
                     <TextBlock DockPanel.Dock="Top" Text="Assign apps to categories"
                                FontWeight="SemiBold" Margin="0,0,0,8" />
+                    <!-- Row virtualization is disabled deliberately: the Category/Tag cells are
+                         ComboBoxes bound TwoWay (UpdateSourceTrigger=PropertyChanged). With the
+                         default virtualization+recycling, scrolling recycles a row's container onto
+                         another app and the ComboBox pushes a stale/null SelectedValue into the new
+                         row before the binding re-reads it — silently overwriting that app's saved
+                         category/tag with a default. Not recycling containers prevents that; the
+                         known-app list is small, so the cost is negligible. -->
                     <DataGrid ItemsSource="{Binding ManagedApps}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
                               CanUserAddRows="False"
                               HeadersVisibility="Column"
                               GridLinesVisibility="Horizontal"
-                              SelectionMode="Single">
+                              SelectionMode="Single"
+                              EnableRowVirtualization="False"
+                              VirtualizingPanel.IsVirtualizing="False">
                         <DataGrid.RowStyle>
                             <Style TargetType="DataGridRow">
                                 <Setter Property="ContextMenu" Value="{StaticResource CategoryAppContextMenu}" />

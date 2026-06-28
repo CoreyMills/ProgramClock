@@ -204,18 +204,21 @@ public sealed class TagLabelVm
     public string Weight { get; set; }
 }
 
-/// <summary>An editable row in the settings efficiency-name editor: the fixed tier plus its label.</summary>
-public sealed class TierLabelVm
+/// <summary>An editable row in the settings efficiency editor: a rating's display name and the
+/// minimum score (as a percentage) needed to reach it. The user can add or remove rows for more or
+/// less granularity; on save the rows are sorted by threshold and the lowest becomes the floor.</summary>
+public sealed class RatingLabelVm
 {
-    public TierLabelVm(EfficiencyTier tier, string name)
+    public RatingLabelVm(string name, double threshold)
     {
-        Tier = tier;
         Name = name;
+        ThresholdPercent = (threshold * 100).ToString("0.#", CultureInfo.InvariantCulture);
     }
 
-    public EfficiencyTier Tier { get; }
-    public string TierKey => Tier.ToString();
     public string Name { get; set; }
+
+    /// <summary>Minimum efficiency percentage (0..100) to reach this rating; bound to the editor TextBox.</summary>
+    public string ThresholdPercent { get; set; }
 }
 
 /// <summary>A category row on the management page. Editing <see cref="Name"/> persists a rename.</summary>
@@ -372,8 +375,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
 
     /// <summary>Editable tag display-name/weight rows shown on the settings page.</summary>
     public ObservableCollection<TagLabelVm> TagLabels { get; } = new();
-    /// <summary>Editable efficiency-tier name rows shown on the settings page.</summary>
-    public ObservableCollection<TierLabelVm> TierLabels { get; } = new();
+    /// <summary>Editable efficiency-rating rows (name + threshold) shown on the settings page. The
+    /// user can add or remove rows for more or less granularity.</summary>
+    public ObservableCollection<RatingLabelVm> RatingLabels { get; } = new();
     /// <summary>The editable list of categories on the management page.</summary>
     public ObservableCollection<CategoryItemVm> ManagedCategories { get; } = new();
     /// <summary>Every known app and its current category, for assignment on the management page.</summary>
@@ -406,6 +410,22 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     private string _totalFocus = "0s";
     public string TotalFocus { get => _totalFocus; private set { _totalFocus = value; OnChanged(); } }
 
+    // The range's overall totals (ms), kept so the header can flip back to them when the selection
+    // summary turns off. The displayed TotalRun/TotalFocus strings may instead show the selected sum.
+    private long _totalRunMs;
+    private long _totalFocusMs;
+    private readonly List<UsageRowVm> _selectedRows = new();
+
+    // Show the combined times of selected rows once this many are highlighted; below it, show the
+    // range total. (One selected row reads fine on its own line, so "combined" starts at two.)
+    private const int SelectionSummaryMin = 2;
+
+    private string _focusLabel = "Total Focused: ";
+    public string FocusLabel { get => _focusLabel; private set { if (_focusLabel != value) { _focusLabel = value; OnChanged(); } } }
+
+    private string _runLabel = "Total Running: ";
+    public string RunLabel { get => _runLabel; private set { if (_runLabel != value) { _runLabel = value; OnChanged(); } } }
+
     private bool _isUserIdle;
     public bool IsUserIdle
     {
@@ -414,13 +434,14 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     }
     public string IdleStatusText => IsUserIdle ? "Idle" : "Active";
 
-    private EfficiencyTier _efficiencyTier = EfficiencyTier.None;
-    /// <summary>Coarse rating of how the selected range's focused time was spent across tags. Drives
-    /// the colour of the efficiency pill in the dashboard header.</summary>
-    public EfficiencyTier EfficiencyTier
+    private string _efficiencyLevel = "None";
+    /// <summary>Coarse colour bucket ("None"/"Low"/"Mid"/"High") for how the selected range's focused
+    /// time was spent. Drives the colour of the efficiency pill in the dashboard header, independent
+    /// of how many ratings the user has defined.</summary>
+    public string EfficiencyLevel
     {
-        get => _efficiencyTier;
-        private set { if (_efficiencyTier != value) { _efficiencyTier = value; OnChanged(); } }
+        get => _efficiencyLevel;
+        private set { if (_efficiencyLevel != value) { _efficiencyLevel = value; OnChanged(); } }
     }
 
     private string _efficiencyText = "Efficiency: —";
@@ -675,9 +696,45 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
             totalRun += kv.Value.Run;
             totalFocus += kv.Value.Focus;
         }
-        TotalRun = TimeFormat.Humanize(totalRun);
-        TotalFocus = TimeFormat.Humanize(totalFocus);
+        _totalRunMs = totalRun;
+        _totalFocusMs = totalFocus;
+        RefreshTotalsDisplay();
         UpdateEfficiency(wanted.Values, totalFocus);
+    }
+
+    /// <summary>Called by the dashboard when the grid selection changes. With <see cref="SelectionSummaryMin"/>
+    /// or more rows selected, the header totals switch to the combined times of just those rows;
+    /// otherwise they return to the range totals.</summary>
+    public void UpdateSelectionTotals(IEnumerable<UsageRowVm> selectedRows)
+    {
+        _selectedRows.Clear();
+        _selectedRows.AddRange(selectedRows);
+        RefreshTotalsDisplay();
+    }
+
+    // Decide whether the header shows the range totals or the current selection's combined times, and
+    // format both labels accordingly. Re-run on every refresh so a held selection stays summed with
+    // fresh values.
+    private void RefreshTotalsDisplay()
+    {
+        // Drop any selected rows a refresh may have pruned out of the range.
+        var selected = _selectedRows.Where(Rows.Contains).ToList();
+        if (selected.Count >= SelectionSummaryMin)
+        {
+            long run = 0, focus = 0;
+            foreach (var r in selected) { run += r.RunMs; focus += r.FocusMs; }
+            TotalRun = TimeFormat.Humanize(run);
+            TotalFocus = TimeFormat.Humanize(focus);
+            RunLabel = "Selected Running: ";
+            FocusLabel = "Selected Focused: ";
+        }
+        else
+        {
+            TotalRun = TimeFormat.Humanize(_totalRunMs);
+            TotalFocus = TimeFormat.Humanize(_totalFocusMs);
+            RunLabel = "Total Running: ";
+            FocusLabel = "Total Focused: ";
+        }
     }
 
     /// <summary>Recompute the efficiency rating from how the range's focused time splits across tags.</summary>
@@ -687,10 +744,12 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         var rowList = rows.ToList();
         bool hasFocus = totalFocus > 0;
         double score = Efficiency.Score(rowList.Select(r => (r.Tag, r.Focus)), _labels.Weight);
-        var tier = Efficiency.ToTier(score, hasFocus);
+        var rating = _labels.RatingFor(score, hasFocus);
 
-        EfficiencyTier = tier;
-        EfficiencyText = hasFocus ? $"Efficiency: {_labels.TierName(tier)} ({score:P0})" : "Efficiency: —";
+        EfficiencyLevel = _labels.LevelFor(score, hasFocus);
+        EfficiencyText = hasFocus && rating is not null
+            ? $"Efficiency: {rating.Name} ({score:P0})"
+            : "Efficiency: —";
 
         if (!hasFocus)
         {
@@ -890,9 +949,34 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         foreach (var t in EfficiencySettings.Tags)
             TagLabels.Add(new TagLabelVm(t, _labels.TagName(t), _labels.Weight(t)));
 
-        TierLabels.Clear();
-        foreach (var tier in EfficiencySettings.NamedTiers)
-            TierLabels.Add(new TierLabelVm(tier, _labels.TierName(tier)));
+        RatingLabels.Clear();
+        foreach (var r in _labels.Ratings)
+            RatingLabels.Add(new RatingLabelVm(r.Name, r.Threshold));
+    }
+
+    /// <summary>Append a new editable rating, defaulting its threshold just above the current highest
+    /// so it slots in at the top. Saved only when the user clicks Save.</summary>
+    public void AddRating()
+    {
+        double maxPct = 0;
+        foreach (var row in RatingLabels)
+            if (double.TryParse(row.ThresholdPercent, NumberStyles.Float, CultureInfo.InvariantCulture, out var p))
+                maxPct = Math.Max(maxPct, p);
+        var next = Math.Min(95, maxPct + 10);
+        RatingLabels.Add(new RatingLabelVm("New rating", next / 100.0));
+    }
+
+    /// <summary>Remove an editable rating, keeping at least two so the scale stays meaningful.</summary>
+    public bool RemoveRating(RatingLabelVm row, out string? error)
+    {
+        error = null;
+        if (RatingLabels.Count <= 2)
+        {
+            error = "Keep at least two efficiency ratings.";
+            return false;
+        }
+        RatingLabels.Remove(row);
+        return true;
     }
 
     /// <summary>Validate and persist the edited tag/efficiency labels and weights. On success the new
@@ -917,15 +1001,34 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
             weights[row.Tag] = w;
         }
 
-        var tiers = new Dictionary<EfficiencyTier, string>();
-        foreach (var row in TierLabels)
+        if (RatingLabels.Count < 2) { error = "Add at least two efficiency ratings."; return false; }
+
+        var ratings = new List<EfficiencyRating>();
+        foreach (var row in RatingLabels)
         {
             var name = row.Name?.Trim();
-            if (string.IsNullOrEmpty(name)) { error = "Efficiency names can't be blank."; return false; }
-            tiers[row.Tier] = name;
+            if (string.IsNullOrEmpty(name)) { error = "Rating names can't be blank."; return false; }
+            if (!double.TryParse(row.ThresholdPercent, NumberStyles.Float, CultureInfo.InvariantCulture, out var pct)
+                || pct < 0 || pct > 100)
+            {
+                error = "Rating thresholds must be percentages between 0 and 100.";
+                return false;
+            }
+            ratings.Add(new EfficiencyRating(name, pct / 100.0));
         }
 
-        _settings.SaveEfficiencySettings(names, weights, tiers);
+        // Sort by threshold and require distinct values so each rating is reachable; the lowest rating
+        // becomes the floor (0%) regardless of what was typed.
+        ratings.Sort((a, b) => a.Threshold.CompareTo(b.Threshold));
+        for (int i = 1; i < ratings.Count; i++)
+            if (ratings[i].Threshold <= ratings[i - 1].Threshold)
+            {
+                error = "Each rating needs a higher threshold than the one below it.";
+                return false;
+            }
+        ratings[0] = ratings[0] with { Threshold = 0.0 };
+
+        _settings.SaveEfficiencySettings(names, weights, ratings);
         _labels = _settings.GetEfficiencySettings();
         RebuildTagChoices();
         foreach (var row in Rows) row.RefreshTagName();

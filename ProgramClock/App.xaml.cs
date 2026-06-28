@@ -84,6 +84,9 @@ public partial class App : Application
             Settings.GetIdleThresholdSeconds(),
             Settings.GetFocusRefreshSeconds(),
             Settings.GetRunRefreshSeconds());
+        _tracker.SetDayHours(Settings.GetDayStart(), Settings.GetDayEnd());
+        _tracker.SetLockStopEnabled(Settings.GetLockStopEnabled());
+        _tracker.SetLockStopMinutes(Settings.GetLockStopMinutes());
         _tracker.Start();
 
         _trayIcon = LoadAppIcon();
@@ -91,6 +94,7 @@ public partial class App : Application
 
         SystemEvents.SessionEnding += (_, _) => _tracker?.Flush();
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        SystemEvents.SessionSwitch += OnSessionSwitch;
 
         ShowDashboard();
 
@@ -103,6 +107,16 @@ public partial class App : Application
         // Fires on wake-from-sleep; run the (opt-in, once-per-day) update check then.
         if (e.Mode == PowerModes.Resume)
             MaybeAutoCheckForUpdates();
+    }
+
+    private void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
+    {
+        // Feed lock/unlock into the tracker so it can stop running time after the PC has been locked
+        // long enough outside the user's day window, and resume it the moment they unlock.
+        if (e.Reason == SessionSwitchReason.SessionLock)
+            _tracker?.SetSessionLocked(true);
+        else if (e.Reason == SessionSwitchReason.SessionUnlock)
+            _tracker?.SetSessionLocked(false);
     }
 
     /// <summary>Runs the automatic update check at most once a day, and only if the user opted in.</summary>
@@ -179,6 +193,7 @@ public partial class App : Application
     private void QuitApp()
     {
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        SystemEvents.SessionSwitch -= OnSessionSwitch;
         if (_dashboard is not null)
         {
             _dashboard.AllowClose = true;   // let it really close (and dispose its view model)

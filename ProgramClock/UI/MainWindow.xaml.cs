@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -328,6 +329,11 @@ public partial class MainWindow : Window
         if (column is not null) column.SortDirection = direction;
     }
 
+    // When the grid selection changes, let the view model decide whether the header shows the range
+    // totals or the combined times of the selected rows.
+    private void OnGridSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        _vm.UpdateSelectionTotals(DashboardGrid.SelectedItems.OfType<UsageRowVm>());
+
     private void OnGridSorting(object sender, DataGridSortingEventArgs e)
     {
         e.Handled = true;
@@ -362,6 +368,10 @@ public partial class MainWindow : Window
         BlockHotkeyBox.Text = HotkeyDisplay(s.GetBlockHotkey());
         AutoStartCheck.IsChecked = AutoStart.IsEnabled();
         AutoUpdateCheck.IsChecked = s.GetAutoUpdateEnabled();
+        DayStartBox.Text = s.GetDayStart();
+        DayEndBox.Text = s.GetDayEnd();
+        LockStopCheck.IsChecked = s.GetLockStopEnabled();
+        LockStopMinutesBox.Text = s.GetLockStopMinutes().ToString();
         StatusText.Text = "";
     }
 
@@ -660,6 +670,19 @@ public partial class MainWindow : Window
         }
     }
 
+    // Add/remove rows in the efficiency-ratings editor. These only change the editable list; nothing
+    // persists until the user clicks Save (OnSaveSettings → TrySaveEfficiencyLabels).
+    private void OnAddRating(object sender, RoutedEventArgs e) => _vm.AddRating();
+
+    private void OnDeleteRating(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: RatingLabelVm row } && !_vm.RemoveRating(row, out var error))
+        {
+            StatusText.Foreground = (Brush)FindResource("AccentBrush");
+            StatusText.Text = error!;
+        }
+    }
+
     private void OnSaveSettings(object sender, RoutedEventArgs e)
     {
         if (!int.TryParse(IdleSecondsBox.Text, out var idle) || idle < 1 ||
@@ -668,6 +691,21 @@ public partial class MainWindow : Window
         {
             StatusText.Foreground = (Brush)FindResource("AccentBrush");
             StatusText.Text = "Enter whole numbers of seconds (1 or more) in every field.";
+            return;
+        }
+
+        if (!TimeOnly.TryParse(DayStartBox.Text.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var dayStartT) ||
+            !TimeOnly.TryParse(DayEndBox.Text.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var dayEndT))
+        {
+            StatusText.Foreground = (Brush)FindResource("AccentBrush");
+            StatusText.Text = "Enter day start and end as 24-hour times like 08:00.";
+            return;
+        }
+
+        if (!int.TryParse(LockStopMinutesBox.Text, out var lockMinutes) || lockMinutes < 0)
+        {
+            StatusText.Foreground = (Brush)FindResource("AccentBrush");
+            StatusText.Text = "Enter the lock timeout as a whole number of minutes (0 or more).";
             return;
         }
 
@@ -707,6 +745,20 @@ public partial class MainWindow : Window
         App.Current.NotifyAutoStartChanged();
 
         s.SetAutoUpdateEnabled(AutoUpdateCheck.IsChecked == true);
+
+        // Normalize the times to "HH:mm" so the stored/displayed values stay consistent.
+        var dayStart = dayStartT.ToString("HH:mm", CultureInfo.InvariantCulture);
+        var dayEnd = dayEndT.ToString("HH:mm", CultureInfo.InvariantCulture);
+        s.SetDayStart(dayStart);
+        s.SetDayEnd(dayEnd);
+        tracker.SetDayHours(dayStart, dayEnd);
+
+        var lockStopEnabled = LockStopCheck.IsChecked == true;
+        s.SetLockStopEnabled(lockStopEnabled);
+        tracker.SetLockStopEnabled(lockStopEnabled);
+
+        s.SetLockStopMinutes(lockMinutes);
+        tracker.SetLockStopMinutes(lockMinutes);
 
         _vm.ApplyRefreshSettings();
         _vm.Page = DashboardPage.Dashboard;

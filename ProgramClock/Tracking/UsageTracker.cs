@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Timers;
 using ProgramClock.Data;
 using Timer = System.Timers.Timer;
@@ -32,6 +33,22 @@ public sealed class UsageTracker : IDisposable
     private volatile bool _paused;
     private volatile bool _isUserIdle;
     private long _idleMs;
+
+    // ── Run-time accrual gates (see ShouldAccrueRun) ────────────────────────────────────────────────
+    // 1. Day gate: running time for a new local day doesn't start until the user has had at least one
+    //    focused increment that day — i.e. they have actually started using the PC. Resets at midnight.
+    private string? _gateDate;   // local date (yyyy-MM-dd) the gate fields below apply to
+    private bool _dayStarted;    // has a focused increment landed today? (guarded by _gate)
+
+    // 2. Outside-hours lock: when enabled, running time stops once the session has been locked for at
+    //    least _lockStopMs AND the current local time is outside the [_dayStartMin, _dayEndMin] window.
+    //    Unlocking clears the lock immediately, so resuming work outside normal hours starts it again.
+    private volatile bool _sessionLocked;
+    private long _lockedSinceTicks;              // DateTime.UtcNow.Ticks when the lock began; 0 if unlocked
+    private volatile int _dayStartMin = 8 * 60;  // day window, minutes since local midnight
+    private volatile int _dayEndMin = 22 * 60;
+    private volatile int _lockStopMs = 15 * 60 * 1000;
+    private volatile bool _lockStopEnabled = true;
 
     private sealed class Pending
     {
@@ -100,6 +117,37 @@ public sealed class UsageTracker : IDisposable
         _runTimer.Interval = _runTickMs;
     }
 
+    /// <summary>Sets the user's day window from "HH:mm" strings; unparseable values fall back to 08:00/22:00.</summary>
+    public void SetDayHours(string startHHmm, string endHHmm)
+    {
+        _dayStartMin = ParseMinutes(startHHmm, 8 * 60);
+        _dayEndMin = ParseMinutes(endHHmm, 22 * 60);
+    }
+
+    public void SetLockStopMinutes(int minutes) => _lockStopMs = Math.Max(0, minutes) * 60_000;
+
+    public void SetLockStopEnabled(bool enabled) => _lockStopEnabled = enabled;
+
+    /// <summary>Called from the OS session lock/unlock events so outside-hours suppression can measure
+    /// how long the PC has been locked. Locking starts the clock; unlocking clears it at once.</summary>
+    public void SetSessionLocked(bool locked)
+    {
+        if (locked)
+        {
+            // Keep the original lock instant if multiple lock events arrive without an unlock.
+            if (!_sessionLocked)
+            {
+                Interlocked.Exchange(ref _lockedSinceTicks, DateTime.UtcNow.Ticks);
+                _sessionLocked = true;
+            }
+        }
+        else
+        {
+            _sessionLocked = false;
+            Interlocked.Exchange(ref _lockedSinceTicks, 0);
+        }
+    }
+
     public void Start()
     {
         _focusTimer.Start();
@@ -115,11 +163,14 @@ public sealed class UsageTracker : IDisposable
         if (_paused) return;
         var snap = ForegroundProbe.Capture();
         Interlocked.Exchange(ref _idleMs, snap.IdleMs);
-        var idle = snap.IdleMs >= _idleThresholdMs;
+        // Treat a locked session as idle: no focused time (and no "day started") should accrue at the
+        // lock screen, even while the password prompt briefly registers input.
+        var idle = _sessionLocked || snap.IdleMs >= _idleThresholdMs;
         _isUserIdle = idle;
         if (snap.App is not null && !idle)
         {
             Accrue(snap.App, runMs: 0, focusMs: _focusTickMs);
+            MarkDayStarted();   // the first focused increment opens the run-time gate for today
             // Browsers also accrue the same focused tick to the active tab's website, so the per-site
             // breakdown sums to (at most) the browser's own focused time.
             if (snap.Host is not null)
@@ -131,10 +182,76 @@ public sealed class UsageTracker : IDisposable
     private void OnRunTick(object? sender, ElapsedEventArgs e)
     {
         if (_paused) return;
-        foreach (var info in ProcessProbe.CaptureUserFacing())
-            Accrue(info, runMs: _runTickMs, focusMs: 0);
+        if (ShouldAccrueRun(DateTime.Now))
+        {
+            foreach (var info in ProcessProbe.CaptureUserFacing())
+                Accrue(info, runMs: _runTickMs, focusMs: 0);
+        }
         RunSampled?.Invoke();
     }
+
+    // ── Run-time gating ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Marks that the user has started using the PC today, opening the run-time gate.</summary>
+    private void MarkDayStarted()
+    {
+        var today = UsageRepository.LocalDate(DateTime.Now);
+        lock (_gate)
+        {
+            RollDayGateIfNeeded(today);
+            _dayStarted = true;
+        }
+    }
+
+    /// <summary>Resets the day gate when the local date advances. Must be called holding <see cref="_gate"/>.</summary>
+    private void RollDayGateIfNeeded(string today)
+    {
+        if (_gateDate != today)
+        {
+            _gateDate = today;
+            _dayStarted = false;
+        }
+    }
+
+    /// <summary>Whether running time should accrue right now: only after the user has started using the
+    /// PC today, and not while suppressed by the outside-hours lock rule.</summary>
+    private bool ShouldAccrueRun(DateTime now)
+    {
+        bool started;
+        lock (_gate)
+        {
+            RollDayGateIfNeeded(UsageRepository.LocalDate(now));
+            started = _dayStarted;
+        }
+        if (!started) return false;
+        return !IsSuppressedByOutsideHoursLock(now);
+    }
+
+    private bool IsSuppressedByOutsideHoursLock(DateTime now)
+    {
+        if (!_lockStopEnabled || !_sessionLocked) return false;
+        var lockedSince = Interlocked.Read(ref _lockedSinceTicks);
+        if (lockedSince == 0) return false;
+        var lockedForMs = (DateTime.UtcNow.Ticks - lockedSince) / TimeSpan.TicksPerMillisecond;
+        if (lockedForMs < _lockStopMs) return false;
+        return !IsWithinDayHours(now);
+    }
+
+    private bool IsWithinDayHours(DateTime now)
+    {
+        int start = _dayStartMin, end = _dayEndMin;
+        if (start == end) return true;   // empty window => never suppress
+        int cur = now.Hour * 60 + now.Minute;
+        return start < end
+            ? cur >= start && cur < end
+            : cur >= start || cur < end; // window wraps past midnight
+    }
+
+    // Parses "HH:mm" into minutes since midnight, or returns the fallback if it can't be parsed.
+    private static int ParseMinutes(string hhmm, int fallback) =>
+        TimeOnly.TryParse(hhmm, CultureInfo.InvariantCulture, DateTimeStyles.None, out var t)
+            ? t.Hour * 60 + t.Minute
+            : fallback;
 
     /// <summary>Unflushed in-memory deltas (ms) accrued today, keyed by exe. Lets the dashboard
     /// show live totals between flushes so the displayed times advance at the refresh cadence.</summary>
