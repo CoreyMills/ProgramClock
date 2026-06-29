@@ -169,6 +169,16 @@ public sealed class SettingsRepository
     public bool GetGrowOnHover() => (Get(GrowOnHoverKey) ?? "1") == "1";
     public void SetGrowOnHover(bool on) => Set(GrowOnHoverKey, on ? "1" : "0");
 
+    // The dashboard's last-used range, restored on the next launch (defaults to Today).
+    public const string LastRangeKey = "last_range";
+    public DateRange GetLastRange() => Enum.TryParse<DateRange>(Get(LastRangeKey), out var r) ? r : DateRange.Today;
+    public void SetLastRange(DateRange range) => Set(LastRangeKey, range.ToString());
+
+    // The dashboard's last-used view as an enum name (e.g. "Table"/"Donut"); the UI parses it back.
+    public const string LastViewKey = "last_view";
+    public string? GetLastView() => Get(LastViewKey);
+    public void SetLastView(string viewName) => Set(LastViewKey, viewName);
+
     // Personalizable tag labels/weights (keyed per enum value, e.g. "tag_name_Main") plus the
     // user-defined efficiency ratings (stored as a JSON list under one key).
     private const string TagNamePrefix = "tag_name_";

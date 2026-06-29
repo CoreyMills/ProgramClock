@@ -379,7 +379,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     public DateRange SelectedRange
     {
         get => _selectedRange;
-        set { if (_selectedRange != value) { _selectedRange = value; OnChanged(); Reload(); } }
+        set { if (_selectedRange != value) { _selectedRange = value; _settings.SetLastRange(value); OnChanged(); Reload(); } }
     }
 
     public Array ViewModes => Enum.GetValues<DashboardView>();
@@ -394,6 +394,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         {
             if (_selectedViewMode == value) return;
             _selectedViewMode = value;
+            _settings.SetLastView(value.ToString());
             OnChanged();
             OnChanged(nameof(TableVisibility));
             OnChanged(nameof(BarVisibility));
@@ -648,6 +649,10 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         _labels = _settings.GetEfficiencySettings();
         _tooltipDelayMs = _settings.GetTooltipDelayMs();
         _growOnHover = _settings.GetGrowOnHover();
+        // Restore the last-used range and view (set the backing fields directly so the initial Reload
+        // below uses them without an extra round-trip).
+        _selectedRange = _settings.GetLastRange();
+        _selectedViewMode = Enum.TryParse<DashboardView>(_settings.GetLastView(), out var v) ? v : DashboardView.Table;
         RebuildTagChoices();
         _dispatcher = Dispatcher.CurrentDispatcher;
         _wheelTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
