@@ -18,54 +18,54 @@ namespace ProgramClock.UI;
 public sealed class UsageRowVm : INotifyPropertyChanged
 {
     private readonly Func<AppTag, string> _tagName;
-    private readonly Action<string, long?> _assignCategory;
-    private readonly Action<string, AppTag> _assignTag;
 
-    // True while Reload updates this row in place, so the tag/category combo setters don't mistake the
-    // refresh for a user edit and re-persist it.
+    // True while Reload updates this row in place. The grid's tag/category dropdown SelectionChanged
+    // handlers check this so a refresh-driven change isn't mistaken for a user edit and re-persisted.
     private bool _syncing;
 
-    public UsageRowVm(string exeName, Func<AppTag, string> tagName,
-        Action<string, long?> assignCategory, Action<string, AppTag> assignTag)
+    public UsageRowVm(string exeName, Func<AppTag, string> tagName)
     {
         ExeName = exeName;
         _tagName = tagName;
-        _assignCategory = assignCategory;
-        _assignTag = assignTag;
     }
 
     public void BeginSync() => _syncing = true;
     public void EndSync() => _syncing = false;
 
+    /// <summary>Re-raise the combo selection properties so the grid's tag/category dropdowns re-resolve
+    /// their <c>SelectedValue</c> after their shared choices list was rebuilt (a <c>Clear()</c> blanks
+    /// every bound combo, and an unchanged value won't fire PropertyChanged on its own). Call inside a
+    /// BeginSync/EndSync window so the re-fired SelectionChanged isn't mistaken for a user edit.</summary>
+    public void RefreshComboSelections()
+    {
+        OnChanged(nameof(SelectedCategoryKey));
+        OnChanged(nameof(SelectedTag));
+    }
+
+    /// <summary>True while Reload is updating this row (so combo SelectionChanged should not persist).</summary>
+    public bool IsSyncing => _syncing;
+
     public string ExeName { get; }
 
     private long? _selectedCategoryId;
-    /// <summary>The row's category id, bound to the grid's category dropdown. A user change persists
-    /// immediately (via the assign callback); Reload-driven changes are silent (see <see cref="_syncing"/>).</summary>
+    /// <summary>The row's category id, shown by the grid's category dropdown. Persistence happens in the
+    /// dropdown's SelectionChanged handler, not here.</summary>
     public long? SelectedCategoryId
     {
         get => _selectedCategoryId;
-        set
-        {
-            if (_selectedCategoryId == value) return;
-            _selectedCategoryId = value;
-            OnChanged(nameof(SelectedCategoryId));
-            if (!_syncing) _assignCategory(ExeName, value);
-        }
+        set { if (_selectedCategoryId != value) { _selectedCategoryId = value; OnChanged(nameof(SelectedCategoryId)); OnChanged(nameof(SelectedCategoryKey)); } }
     }
 
-    /// <summary>The row's tag, bound to the grid's tag dropdown. Wraps <see cref="Tag"/> and persists a
-    /// user change immediately; Reload-driven changes are silent.</summary>
+    /// <summary>Non-null key the category combo binds its SelectedValue to (0 = Uncategorized), so a null
+    /// category still selects the "Uncategorized" item instead of leaving the combo blank.</summary>
+    public long SelectedCategoryKey => _selectedCategoryId ?? 0;
+
+    /// <summary>The row's tag, shown by the grid's tag dropdown (wraps <see cref="Tag"/>). Persistence
+    /// happens in the dropdown's SelectionChanged handler.</summary>
     public AppTag SelectedTag
     {
         get => Tag;
-        set
-        {
-            if (Tag == value) return;
-            Tag = value;
-            OnChanged(nameof(SelectedTag));
-            if (!_syncing) _assignTag(ExeName, value);
-        }
+        set { if (Tag != value) { Tag = value; OnChanged(nameof(SelectedTag)); } }
     }
 
     /// <summary>Per-website focused-time breakdown shown in this row's expandable detail area. Empty
@@ -225,7 +225,13 @@ public sealed class SiteRowVm : INotifyPropertyChanged
 public enum DashboardPage { Dashboard, Settings, Categories }
 
 /// <summary>A selectable category for the per-app assignment dropdown. A null Id means "Uncategorized".</summary>
-public sealed record CategoryChoice(long? Id, string Name);
+public sealed record CategoryChoice(long? Id, string Name)
+{
+    // A non-null binding key: real category ids are positive SQLite rowids, so 0 stands in for the
+    // "Uncategorized" (null Id) choice. A ComboBox treats SelectedValue=null as "no selection" and can't
+    // select the null-Id item, so the grid binds on this key instead and maps 0 back to null on save.
+    public long Key => Id ?? 0;
+}
 
 /// <summary>A selectable tag for the per-app dropdown: the enum value plus its current display name.</summary>
 public sealed record TagChoice(AppTag Tag, string Name);
@@ -361,7 +367,7 @@ public sealed class AppCategoryItemVm : INotifyPropertyChanged
 
 /// <summary>How the dashboard data is visualized. Table is the default; the others are hand-drawn
 /// charts. Only the selected view's data is ever shaped (see <see cref="DashboardViewModel.BuildChartData"/>).</summary>
-public enum DashboardView { Table, Bar, Donut, Trend }
+public enum DashboardView { Table, Bar, Donut, Trend, Minimal }
 
 /// <summary>One app's slice within a category, for the bar segments and the donut's inner ring.</summary>
 public sealed record AppSlice(string DisplayName, long Value, Brush Color, double Percent);
@@ -441,6 +447,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
             OnChanged(nameof(BarVisibility));
             OnChanged(nameof(DonutVisibility));
             OnChanged(nameof(TrendVisibility));
+            OnChanged(nameof(MinimalVisibility));
             OnChanged(nameof(MetricToggleVisibility));
             BuildChartData();
         }
@@ -450,6 +457,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     public Visibility BarVisibility => _selectedViewMode == DashboardView.Bar ? Visibility.Visible : Visibility.Collapsed;
     public Visibility DonutVisibility => _selectedViewMode == DashboardView.Donut ? Visibility.Visible : Visibility.Collapsed;
     public Visibility TrendVisibility => _selectedViewMode == DashboardView.Trend ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility MinimalVisibility => _selectedViewMode == DashboardView.Minimal ? Visibility.Visible : Visibility.Collapsed;
 
     private bool _showFocused = true;
     /// <summary>Which metric the charts visualize: focused time when true, running time when false.</summary>
@@ -462,9 +470,10 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     public string MetricLabel => ShowFocused ? "Focused" : "Running";
 
     /// <summary>The Focused/Running toggle is only meaningful for the charts (each shows one metric);
-    /// the Table already shows both columns, so it's hidden there.</summary>
+    /// the Table and Minimal views already show both figures, so it's hidden there.</summary>
     public Visibility MetricToggleVisibility =>
-        _selectedViewMode == DashboardView.Table ? Visibility.Collapsed : Visibility.Visible;
+        _selectedViewMode is DashboardView.Table or DashboardView.Minimal
+            ? Visibility.Collapsed : Visibility.Visible;
 
     private ChartSnapshot? _chartData;
     /// <summary>The current chart snapshot for the active view (null for Table or empty ranges).</summary>
@@ -547,6 +556,15 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
 
     private string _totalFocus = "0s";
     public string TotalFocus { get => _totalFocus; private set { _totalFocus = value; OnChanged(); } }
+
+    // The Minimal view's two big figures: focused time, and "unfocused" = longest-running minus focused
+    // (time the PC was in use but you weren't focused on any tracked app). Always the range totals,
+    // independent of any grid selection.
+    private string _minimalFocused = "0s";
+    public string MinimalFocused { get => _minimalFocused; private set { if (_minimalFocused != value) { _minimalFocused = value; OnChanged(); } } }
+
+    private string _minimalUnfocused = "0s";
+    public string MinimalUnfocused { get => _minimalUnfocused; private set { if (_minimalUnfocused != value) { _minimalUnfocused = value; OnChanged(); } } }
 
     // The range's overall totals (ms), kept so the header can flip back to them when the selection
     // summary turns off. The displayed TotalRun/TotalFocus strings may instead show the selected sum.
@@ -828,7 +846,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         {
             if (!existing.TryGetValue(kv.Key, out var row))
             {
-                row = new UsageRowVm(kv.Key, ResolveTagName, AssignCategoryByExe, AssignTagByExe);
+                row = new UsageRowVm(kv.Key, ResolveTagName);
                 Rows.Add(row);
             }
             // Update in place under a sync guard so the tag/category combo bindings don't treat these
@@ -852,6 +870,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         }
         _totalRunMs = totalRun;
         _totalFocusMs = totalFocus;
+        // Minimal view: focused vs. unfocused (in-use-but-not-focused = longest running − focused).
+        MinimalFocused = TimeFormat.Humanize(totalFocus);
+        MinimalUnfocused = TimeFormat.Humanize(Math.Max(0, totalRun - totalFocus));
         RefreshTotalsDisplay();
         UpdateEfficiency(wanted.Values, totalFocus);
 
@@ -1054,7 +1075,8 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         CategoryChoices.Clear();
         CategoryChoices.Add(new CategoryChoice(null, "Uncategorized"));
         foreach (var c in _categories.List()) CategoryChoices.Add(new CategoryChoice(c.Id, c.Name));
-        foreach (var row in Rows) row.EndSync();
+        // Repopulating cleared every bound combo; re-assert each row's selection so they re-resolve.
+        foreach (var row in Rows) { row.RefreshComboSelections(); row.EndSync(); }
     }
 
     public void CreateCategory(string name)
@@ -1077,24 +1099,29 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
 
     private void AssignAppTag(long appId, AppTag tag) => _categories.AssignTag(appId, tag);
 
-    // Immediate tag/category edits from the main dashboard grid, keyed by exe.
-    private void AssignCategoryByExe(string exeName, long? categoryId) =>
+    // Immediate tag/category edits from the main dashboard grid, keyed by exe (called from the grid's
+    // dropdown SelectionChanged handlers).
+    public void SetRowCategory(string exeName, long? categoryId) =>
         _categories.AssignAppByExe(exeName, categoryId);
 
-    private void AssignTagByExe(string exeName, AppTag tag) =>
+    public void SetRowTag(string exeName, AppTag tag) =>
         _categories.AssignTagByExe(exeName, tag);
 
-    /// <summary>Clear the given apps' tracked time for the current range (keeps the apps and their
-    /// tags/categories). Flush first so the DB holds the pending deltas the reset then removes.</summary>
+    /// <summary>Clear the given apps' tracked time (run and focus) for the current range, keeping the
+    /// apps and their tags/categories. Drops any unflushed pending first so nothing lingers.</summary>
     public void ResetSelection(IReadOnlyCollection<string> exeNames)
     {
         if (exeNames.Count == 0) return;
-        _tracker.Flush();
-        foreach (var exe in exeNames) _usage.ResetApp(exe, SelectedRange);
+        foreach (var exe in exeNames)
+        {
+            _tracker.ForgetPending(exe);
+            _usage.ResetApp(exe, SelectedRange);
+        }
         Reload();
     }
 
-    /// <summary>Clear every app's tracked time for the current range (apps/tags/categories preserved).</summary>
+    /// <summary>Clear every app's tracked time (run and focus) for the current range
+    /// (apps/tags/categories preserved). Flush first so the DB holds the pending the reset removes.</summary>
     public void ResetAllForRange()
     {
         _tracker.Flush();
@@ -1227,9 +1254,12 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     private void RebuildTagChoices()
     {
         foreach (var a in ManagedApps) a.Detached = true;
+        foreach (var row in Rows) row.BeginSync();
         TagChoices.Clear();
         foreach (var t in EfficiencySettings.Tags)
             TagChoices.Add(new TagChoice(t, _labels.TagName(t)));
+        // Repopulating cleared every bound combo; re-assert each row's selection so they re-resolve.
+        foreach (var row in Rows) { row.RefreshComboSelections(); row.EndSync(); }
     }
 
     /// <summary>Populate the settings-page tag/efficiency editors from the saved labels and weights.</summary>

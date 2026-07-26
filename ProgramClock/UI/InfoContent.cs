@@ -7,11 +7,11 @@ public static class InfoContent
     /// <summary>Bulleted changes for the current release, each noting where to find the feature.</summary>
     public static readonly IReadOnlyList<string> PatchNotes = new[]
     {
-        "Edit an app's category and tag directly in the dashboard table — use the dropdowns in the Category and Tag columns; changes apply immediately.",
-        "Right-click an app → \"Reset data (current range)\" to clear just that app's tracked time for the range you're viewing.",
-        "New \"Clear range data\" button in the top bar clears every app's time for the current range.",
-        "The window now has a minimum size, so the top-bar controls can no longer be shrunk out of view.",
-        "The dashboard remembers your last Range and View between runs.",
+        "New \"Minimal\" view (in the View selector) shows just two big figures — Focused, and Unfocused (in-use-but-not-focused time) — for an at-a-glance read of your day.",
+        "Fixed: the dashboard table's category and tag dropdowns now commit reliably when you pick an option.",
+        "Fixed: apps set to \"Uncategorized\" now show that in the table instead of appearing blank, including after visiting the Categories page.",
+        "Re-open this Patch Notes popup or the Introduction any time from Settings → General → Help.",
+        "Right-click → \"Reset data (current range)\" now clears both focused and running time for that app.",
     };
 
     /// <summary>General how-to shown once on a fresh install.</summary>
@@ -19,7 +19,7 @@ public static class InfoContent
     {
         "ProgramClock tracks, per app, how long it runs and how long you're actively focused in it — all stored locally on your PC, nothing is sent anywhere.",
         "It lives in the system tray: click the tray icon to open this dashboard; right-click it for quick actions and to quit.",
-        "Use the Range selector (Today / Week / Month / All) and the View selector (Table, Bar, Donut, Trend) in the top bar to explore your usage.",
+        "Use the Range selector (Today / Week / Month / All) and the View selector (Table, Bar, Donut, Trend, Minimal) in the top bar to explore your usage.",
         "Set an app's category and tag right in the table; create and manage categories on the Categories page.",
         "Tune behaviour in Settings — idle timeout, day hours, chart options, keyboard shortcuts and efficiency ratings.",
         "Updates are opt-in: turn on the daily check, or use \"Check for Updates\" in Settings → Updates.",

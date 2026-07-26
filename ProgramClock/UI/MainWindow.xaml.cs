@@ -136,7 +136,12 @@ public partial class MainWindow : Window
             switch (d)
             {
                 case System.Windows.Controls.ComboBox:
-                    return HitKind.Chrome;     // tag/category dropdown — leave clicks to WPF
+                case System.Windows.Controls.ComboBoxItem:
+                    // The tag/category dropdown, or an item inside its open popup. The popup's items route
+                    // their clicks up through this grid handler; without this the click would be treated as
+                    // an empty-space rubber-band (handled + mouse-captured), stealing it from the item so
+                    // the selection never commits. Leave all of it to WPF.
+                    return HitKind.Chrome;
                 case DataGridColumnHeader:
                 case ScrollBar:
                     return HitKind.Chrome;     // header (sort) or scrollbar — leave to WPF
@@ -257,9 +262,13 @@ public partial class MainWindow : Window
     }
 
     // Close out any drag gesture: release capture and resume refreshing, catching up on the ticks we
-    // skipped while the button was down so the grid lands on fresh totals.
+    // skipped while the button was down so the grid lands on fresh totals. Guarded by _dragActive so an
+    // ordinary click that just opened a row's tag/category dropdown (which also suspends refresh, via
+    // DropDownOpened) isn't torn down here — that mouse-up would otherwise reload the grid mid-pick and
+    // move the row out from under the open dropdown.
     private void EndDrag()
     {
+        if (!_dragActive) return;
         _dragActive = false;
         if (DashboardGrid.IsMouseCaptured) DashboardGrid.ReleaseMouseCapture();
         if (_vm.SuspendRefresh)
@@ -494,6 +503,14 @@ public partial class MainWindow : Window
 
     private void OnManualRefresh(object sender, RoutedEventArgs e) => _vm.ForceRefresh();
 
+    // Re-open the one-time popups on demand from Settings → General.
+    private void OnShowIntroduction(object sender, RoutedEventArgs e) =>
+        new InfoDialog("Introduction", "Welcome to ProgramClock.", InfoContent.Welcome) { Owner = this }.ShowDialog();
+
+    private void OnShowPatchNotes(object sender, RoutedEventArgs e) =>
+        new InfoDialog("Patch Notes", $"What's new in ProgramClock {UpdateService.CurrentVersion.ToString(3)}.",
+            InfoContent.PatchNotes) { Owner = this }.ShowDialog();
+
     // Flip the charts between focused and running time. (A subtle-styled button rather than a raw
     // ToggleButton so it matches the other header buttons.)
     private void OnToggleMetric(object sender, RoutedEventArgs e) => _vm.ShowFocused = !_vm.ShowFocused;
@@ -527,6 +544,35 @@ public partial class MainWindow : Window
     private void OnDeleteSelection(object sender, RoutedEventArgs e) => DeleteCurrentSelection();
 
     private void OnBlockSelection(object sender, RoutedEventArgs e) => BlockCurrentSelection();
+
+    // Persist an inline category/tag change from the main grid. Guarded by IsSyncing so Reload's own
+    // in-place updates (which also move the combo selection) aren't mistaken for user edits.
+    // The main grid live-resorts and reloads every tick. While a row's tag/category dropdown is open we
+    // freeze that (SuspendRefresh) so the row can't move or regenerate out from under the user mid-pick —
+    // which is what stopped selections from committing.
+    private void OnRowComboOpened(object sender, EventArgs e) => _vm.SuspendRefresh = true;
+
+    private void OnRowComboClosed(object sender, EventArgs e) => _vm.SuspendRefresh = false;
+
+    private void OnRowCategoryChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ComboBox { DataContext: UsageRowVm row } cb || row.IsSyncing)
+            return;
+        // SelectedValue is the choice's Key (0 = Uncategorized); map it back to a null category id.
+        long? picked = cb.SelectedValue is long k && k != 0 ? k : null;
+        if (picked == row.SelectedCategoryId) return;   // no real change (e.g. the combo's initial selection)
+        row.SelectedCategoryId = picked;                // keep the VM in step so a reload won't revert it
+        _vm.SetRowCategory(row.ExeName, picked);
+    }
+
+    private void OnRowTagChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ComboBox { DataContext: UsageRowVm row } cb || row.IsSyncing)
+            return;
+        if (cb.SelectedValue is not AppTag tag || tag == row.SelectedTag) return;
+        row.SelectedTag = tag;
+        _vm.SetRowTag(row.ExeName, tag);
+    }
 
     // Reset the selected apps' tracked time for the current range (kept app rows, tags, categories).
     private void OnResetSelection(object sender, RoutedEventArgs e)

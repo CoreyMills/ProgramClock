@@ -307,8 +307,10 @@
                             <DataTemplate>
                                 <ComboBox Margin="2,1"
                                           ItemsSource="{Binding Data.CategoryChoices, Source={StaticResource proxy}}"
-                                          SelectedValuePath="Id" DisplayMemberPath="Name"
-                                          SelectedValue="{Binding SelectedCategoryId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                          SelectedValuePath="Key" DisplayMemberPath="Name"
+                                          SelectedValue="{Binding SelectedCategoryKey, Mode=OneWay}"
+                                          SelectionChanged="OnRowCategoryChanged"
+                                          DropDownOpened="OnRowComboOpened" DropDownClosed="OnRowComboClosed" />
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
@@ -318,7 +320,9 @@
                                 <ComboBox Margin="2,1"
                                           ItemsSource="{Binding Data.TagChoices, Source={StaticResource proxy}}"
                                           SelectedValuePath="Tag" DisplayMemberPath="Name"
-                                          SelectedValue="{Binding SelectedTag, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                          SelectedValue="{Binding SelectedTag, Mode=OneWay}"
+                                          SelectionChanged="OnRowTagChanged"
+                                          DropDownOpened="OnRowComboOpened" DropDownClosed="OnRowComboClosed" />
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
@@ -362,6 +366,24 @@
                 <charts:BarChartView   Visibility="{Binding BarVisibility}" />
                 <charts:DonutChartView Visibility="{Binding DonutVisibility}" />
                 <charts:TrendChartView Visibility="{Binding TrendVisibility}" />
+
+                <!-- Minimal view: just the two headline figures, large, for an at-a-glance read. -->
+                <Grid Visibility="{Binding MinimalVisibility}">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <StackPanel Margin="0,0,0,24" HorizontalAlignment="Center">
+                            <TextBlock Text="Focused" HorizontalAlignment="Center" FontSize="18"
+                                       Foreground="{DynamicResource SubtleBrush}" />
+                            <TextBlock Text="{Binding MinimalFocused}" HorizontalAlignment="Center"
+                                       FontSize="72" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}" />
+                        </StackPanel>
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="Unfocused" HorizontalAlignment="Center" FontSize="18"
+                                       Foreground="{DynamicResource SubtleBrush}" />
+                            <TextBlock Text="{Binding MinimalUnfocused}" HorizontalAlignment="Center"
+                                       FontSize="72" FontWeight="Bold" Foreground="{DynamicResource ForegroundBrush}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
             </Grid>
         </DockPanel>
 
@@ -424,6 +446,17 @@
                                 </Popup>
                             </StackPanel>
                             <TextBlock Text="The app background colour. Defaults to your Windows light/dark theme; click the swatch to pick a colour to override it (text, surfaces and borders adjust to match). Changes apply instantly."
+                                       Foreground="{DynamicResource SubtleBrush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="0,6,0,0" />
+
+                            <TextBlock Text="Help" FontWeight="SemiBold" Margin="0,20,0,6" />
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Show introduction" Style="{StaticResource SubtleButton}"
+                                        Padding="10,4" Click="OnShowIntroduction" />
+                                <Button Content="Show patch notes" Style="{StaticResource SubtleButton}"
+                                        Padding="10,4" Margin="8,0,0,0" Click="OnShowPatchNotes" />
+                            </StackPanel>
+                            <TextBlock Text="Re-open the welcome introduction or the latest release's patch notes."
                                        Foreground="{DynamicResource SubtleBrush}" FontSize="11"
                                        TextWrapping="Wrap" Margin="0,6,0,0" />
                         </StackPanel>
