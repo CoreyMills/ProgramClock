@@ -172,6 +172,59 @@ public sealed class UsageRepository
         }
     }
 
+    /// <summary>Clear one app's recorded run/focus time within the range, keeping the app row (and its
+    /// tag/category/first-seen). Its per-site rows in the range are dropped too. The app reappears with
+    /// fresh time as it's tracked again.</summary>
+    public void ResetApp(string exeName, DateRange range)
+    {
+        var (from, to) = RangeBounds(range);
+        lock (_conn)
+        {
+            using var sel = _conn.CreateCommand();
+            sel.CommandText = "SELECT id FROM apps WHERE exe_name=$e;";
+            sel.Parameters.AddWithValue("$e", exeName);
+            if (sel.ExecuteScalar() is not { } found) return;
+            var id = Convert.ToInt64(found);
+
+            using var delSites = _conn.CreateCommand();
+            delSites.CommandText =
+                "DELETE FROM site_usage_daily WHERE app_id=$id " +
+                "AND ($from IS NULL OR date >= $from) AND ($to IS NULL OR date <= $to);";
+            delSites.Parameters.AddWithValue("$id", id);
+            delSites.Parameters.AddWithValue("$from", (object?)from ?? DBNull.Value);
+            delSites.Parameters.AddWithValue("$to", (object?)to ?? DBNull.Value);
+            delSites.ExecuteNonQuery();
+
+            using var delUsage = _conn.CreateCommand();
+            delUsage.CommandText =
+                "DELETE FROM usage_daily WHERE app_id=$id " +
+                "AND ($from IS NULL OR date >= $from) AND ($to IS NULL OR date <= $to);";
+            delUsage.Parameters.AddWithValue("$id", id);
+            delUsage.Parameters.AddWithValue("$from", (object?)from ?? DBNull.Value);
+            delUsage.Parameters.AddWithValue("$to", (object?)to ?? DBNull.Value);
+            delUsage.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>Clear every app's recorded run/focus time within the range (and all per-site rows in
+    /// it). App rows, tags and categories are preserved.</summary>
+    public void ResetAll(DateRange range)
+    {
+        var (from, to) = RangeBounds(range);
+        lock (_conn)
+        {
+            foreach (var table in new[] { "site_usage_daily", "usage_daily" })
+            {
+                using var cmd = _conn.CreateCommand();
+                cmd.CommandText =
+                    $"DELETE FROM {table} WHERE ($from IS NULL OR date >= $from) AND ($to IS NULL OR date <= $to);";
+                cmd.Parameters.AddWithValue("$from", (object?)from ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$to", (object?)to ?? DBNull.Value);
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+
     /// <summary>Remove one website's recorded focused time under a single browser. Each focused tick is
     /// accrued to both the browser and the active site, so the browser's daily focus total includes the
     /// site's time; subtract it (per date, floored at 0) before dropping the site rows so the browser's
@@ -242,6 +295,7 @@ public sealed class UsageRepository
             cmd.CommandText =
                 "SELECT a.exe_name, COALESCE(a.display_name, a.exe_name) AS name, " +
                 "MAX(u.run_ms) AS run, SUM(u.focus_ms) AS focus, " +
+                "a.category_id AS category_id, " +
                 "COALESCE(c.name, 'Uncategorized') AS category, " +
                 "COALESCE(a.tag, 'Other') AS tag " +
                 "FROM usage_daily u JOIN apps a ON a.id = u.app_id " +
@@ -262,8 +316,9 @@ public sealed class UsageRepository
                     DisplayName = r.GetString(1),
                     RunMs = r.IsDBNull(2) ? 0 : r.GetInt64(2),
                     FocusMs = r.IsDBNull(3) ? 0 : r.GetInt64(3),
-                    CategoryName = r.GetString(4),
-                    Tag = r.GetString(5).ParseTag(),
+                    CategoryId = r.IsDBNull(4) ? null : r.GetInt64(4),
+                    CategoryName = r.GetString(5),
+                    Tag = r.GetString(6).ParseTag(),
                 });
             }
             return rows;

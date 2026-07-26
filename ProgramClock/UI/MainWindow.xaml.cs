@@ -14,6 +14,10 @@ using ListBox = System.Windows.Controls.ListBox;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 using TextBox = System.Windows.Controls.TextBox;
 using ScrollBar = System.Windows.Controls.Primitives.ScrollBar;
+using MessageBox = System.Windows.MessageBox;
+using MessageBoxButton = System.Windows.MessageBoxButton;
+using MessageBoxResult = System.Windows.MessageBoxResult;
+using MessageBoxImage = System.Windows.MessageBoxImage;
 
 namespace ProgramClock.UI;
 
@@ -131,6 +135,8 @@ public partial class MainWindow : Window
                 return HitKind.Chrome;
             switch (d)
             {
+                case System.Windows.Controls.ComboBox:
+                    return HitKind.Chrome;     // tag/category dropdown — leave clicks to WPF
                 case DataGridColumnHeader:
                 case ScrollBar:
                     return HitKind.Chrome;     // header (sort) or scrollbar — leave to WPF
@@ -521,6 +527,27 @@ public partial class MainWindow : Window
     private void OnDeleteSelection(object sender, RoutedEventArgs e) => DeleteCurrentSelection();
 
     private void OnBlockSelection(object sender, RoutedEventArgs e) => BlockCurrentSelection();
+
+    // Reset the selected apps' tracked time for the current range (kept app rows, tags, categories).
+    private void OnResetSelection(object sender, RoutedEventArgs e)
+    {
+        var apps = DashboardGrid.SelectedItems.OfType<UsageRowVm>().Select(r => r.ExeName).ToList();
+        if (apps.Count == 0) return;
+        var who = apps.Count == 1 ? $"\"{apps[0]}\"" : $"{apps.Count} apps";
+        var ok = MessageBox.Show(
+            $"Reset tracked data for {who} in the {_vm.SelectedRange} range?\nThis can't be undone.",
+            "Reset data", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (ok == MessageBoxResult.Yes) _vm.ResetSelection(apps);
+    }
+
+    // Reset every app's tracked time for the current range.
+    private void OnClearRange(object sender, RoutedEventArgs e)
+    {
+        var ok = MessageBox.Show(
+            $"Clear all tracked time for the {_vm.SelectedRange} range?\nThis clears every app and can't be undone.",
+            "Clear range data", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (ok == MessageBoxResult.Yes) _vm.ResetAllForRange();
+    }
 
     private void DeleteCurrentSelection()
     {

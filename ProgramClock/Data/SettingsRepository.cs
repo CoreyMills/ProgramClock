@@ -179,6 +179,11 @@ public sealed class SettingsRepository
     public string? GetLastView() => Get(LastViewKey);
     public void SetLastView(string viewName) => Set(LastViewKey, viewName);
 
+    // The app version last seen by the user, used to show the patch-notes popup once per update.
+    public const string LastSeenVersionKey = "last_seen_version";
+    public string? GetLastSeenVersion() => Get(LastSeenVersionKey);
+    public void SetLastSeenVersion(string version) => Set(LastSeenVersionKey, version);
+
     // Personalizable tag labels/weights (keyed per enum value, e.g. "tag_name_Main") plus the
     // user-defined efficiency ratings (stored as a JSON list under one key).
     private const string TagNamePrefix = "tag_name_";

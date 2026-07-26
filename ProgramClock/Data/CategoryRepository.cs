@@ -107,6 +107,34 @@ public sealed class CategoryRepository
         }
     }
 
+    /// <summary>Assign a category to an app by exe name, resolving (or inserting) its row first — so the
+    /// dashboard can categorize an app even before its first flush inserts it.</summary>
+    public void AssignAppByExe(string exeName, long? categoryId)
+    {
+        lock (_conn) AssignApp(EnsureAppId(exeName), categoryId);
+    }
+
+    /// <summary>Assign a tag to an app by exe name (resolving/inserting its row first).</summary>
+    public void AssignTagByExe(string exeName, AppTag tag)
+    {
+        lock (_conn) AssignTag(EnsureAppId(exeName), tag);
+    }
+
+    // Find the app id for an exe, inserting a bare row (exe + first_seen) if it isn't tracked yet.
+    private long EnsureAppId(string exeName)
+    {
+        using var sel = _conn.CreateCommand();
+        sel.CommandText = "SELECT id FROM apps WHERE exe_name=$e;";
+        sel.Parameters.AddWithValue("$e", exeName);
+        if (sel.ExecuteScalar() is { } found) return Convert.ToInt64(found);
+
+        using var ins = _conn.CreateCommand();
+        ins.CommandText = "INSERT INTO apps(exe_name, first_seen) VALUES($e,$t); SELECT last_insert_rowid();";
+        ins.Parameters.AddWithValue("$e", exeName);
+        ins.Parameters.AddWithValue("$t", DateTime.UtcNow.ToString("o"));
+        return Convert.ToInt64(ins.ExecuteScalar());
+    }
+
     /// <summary>One-time pass that applies the auto-categorization rules to apps that have no category
     /// yet (e.g. rows recorded before categories existed). Returns how many were assigned.</summary>
     public int BackfillUncategorized()

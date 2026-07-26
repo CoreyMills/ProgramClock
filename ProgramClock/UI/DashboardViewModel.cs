@@ -18,14 +18,55 @@ namespace ProgramClock.UI;
 public sealed class UsageRowVm : INotifyPropertyChanged
 {
     private readonly Func<AppTag, string> _tagName;
+    private readonly Action<string, long?> _assignCategory;
+    private readonly Action<string, AppTag> _assignTag;
 
-    public UsageRowVm(string exeName, Func<AppTag, string> tagName)
+    // True while Reload updates this row in place, so the tag/category combo setters don't mistake the
+    // refresh for a user edit and re-persist it.
+    private bool _syncing;
+
+    public UsageRowVm(string exeName, Func<AppTag, string> tagName,
+        Action<string, long?> assignCategory, Action<string, AppTag> assignTag)
     {
         ExeName = exeName;
         _tagName = tagName;
+        _assignCategory = assignCategory;
+        _assignTag = assignTag;
     }
 
+    public void BeginSync() => _syncing = true;
+    public void EndSync() => _syncing = false;
+
     public string ExeName { get; }
+
+    private long? _selectedCategoryId;
+    /// <summary>The row's category id, bound to the grid's category dropdown. A user change persists
+    /// immediately (via the assign callback); Reload-driven changes are silent (see <see cref="_syncing"/>).</summary>
+    public long? SelectedCategoryId
+    {
+        get => _selectedCategoryId;
+        set
+        {
+            if (_selectedCategoryId == value) return;
+            _selectedCategoryId = value;
+            OnChanged(nameof(SelectedCategoryId));
+            if (!_syncing) _assignCategory(ExeName, value);
+        }
+    }
+
+    /// <summary>The row's tag, bound to the grid's tag dropdown. Wraps <see cref="Tag"/> and persists a
+    /// user change immediately; Reload-driven changes are silent.</summary>
+    public AppTag SelectedTag
+    {
+        get => Tag;
+        set
+        {
+            if (Tag == value) return;
+            Tag = value;
+            OnChanged(nameof(SelectedTag));
+            if (!_syncing) _assignTag(ExeName, value);
+        }
+    }
 
     /// <summary>Per-website focused-time breakdown shown in this row's expandable detail area. Empty
     /// for non-browsers (see <see cref="HasSites"/>).</summary>
@@ -654,6 +695,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         _selectedRange = _settings.GetLastRange();
         _selectedViewMode = Enum.TryParse<DashboardView>(_settings.GetLastView(), out var v) ? v : DashboardView.Table;
         RebuildTagChoices();
+        RebuildCategoryChoices();
         _dispatcher = Dispatcher.CurrentDispatcher;
         _wheelTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _wheelTimer.Tick += (_, _) => UpdateWheel();
@@ -732,11 +774,11 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         // DB holds flushed totals; merge the tracker's unflushed in-memory deltas on top so the
         // grid advances every refresh tick instead of only at the 30 s flush. Every range ends at
         // today, so today's pending always belongs in the displayed totals.
-        var merged = new Dictionary<string, (string Name, long Run, long Focus, string Category, AppTag Tag)>(
+        var merged = new Dictionary<string, (string Name, long Run, long Focus, long? CategoryId, string Category, AppTag Tag)>(
             StringComparer.OrdinalIgnoreCase);
 
         foreach (var r in _usage.Query(SelectedRange))
-            merged[r.ExeName] = (r.DisplayName, r.RunMs, r.FocusMs, r.CategoryName, r.Tag);
+            merged[r.ExeName] = (r.DisplayName, r.RunMs, r.FocusMs, r.CategoryId, r.CategoryName, r.Tag);
 
         foreach (var p in _tracker.SnapshotPending())
         {
@@ -748,8 +790,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
             var cat = had
                 ? (string.IsNullOrEmpty(cur.Category) ? "Uncategorized" : cur.Category)
                 : (CategoryRules.Guess(p.ExeName, p.Publisher) ?? "Uncategorized");
+            var catId = had ? cur.CategoryId : null;
             var tag = had ? cur.Tag : AppTag.Other;
-            merged[p.ExeName] = (name, cur.Run + p.RunMs, cur.Focus + p.FocusMs, cat, tag);
+            merged[p.ExeName] = (name, cur.Run + p.RunMs, cur.Focus + p.FocusMs, catId, cat, tag);
         }
 
         // Only apps with time accrued are shown.
@@ -785,14 +828,19 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         {
             if (!existing.TryGetValue(kv.Key, out var row))
             {
-                row = new UsageRowVm(kv.Key, ResolveTagName);
+                row = new UsageRowVm(kv.Key, ResolveTagName, AssignCategoryByExe, AssignTagByExe);
                 Rows.Add(row);
             }
+            // Update in place under a sync guard so the tag/category combo bindings don't treat these
+            // Reload-driven writes as user edits and re-persist them.
+            row.BeginSync();
             row.DisplayName = kv.Value.Name;
             row.RunMs = kv.Value.Run;
             row.FocusMs = kv.Value.Focus;
             row.CategoryName = kv.Value.Category;
-            row.Tag = kv.Value.Tag;
+            row.SelectedCategoryId = kv.Value.CategoryId;
+            row.SelectedTag = kv.Value.Tag;
+            row.EndSync();
             row.UpdateSites(sitesByExe.TryGetValue(kv.Key, out var hosts)
                 ? hosts
                 : EmptySites);
@@ -814,7 +862,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     }
 
     // The latest per-app merged data from Reload, reused by BuildChartData on metric/view changes.
-    private Dictionary<string, (string Name, long Run, long Focus, string Category, AppTag Tag)> _lastWanted =
+    private Dictionary<string, (string Name, long Run, long Focus, long? CategoryId, string Category, AppTag Tag)> _lastWanted =
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Shape the chart snapshot for the <em>currently selected</em> view only. Table does no
@@ -832,7 +880,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
 
     private ChartSnapshot BuildCategorySnapshot()
     {
-        long Metric((string Name, long Run, long Focus, string Category, AppTag Tag) v) =>
+        long Metric((string Name, long Run, long Focus, long? CategoryId, string Category, AppTag Tag) v) =>
             ShowFocused ? v.Focus : v.Run;
 
         var groups = _lastWanted.Values
@@ -948,7 +996,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
 
     /// <summary>Recompute the efficiency rating from how the range's focused time splits across tags.</summary>
     private void UpdateEfficiency(
-        IEnumerable<(string Name, long Run, long Focus, string Category, AppTag Tag)> rows, long totalFocus)
+        IEnumerable<(string Name, long Run, long Focus, long? CategoryId, string Category, AppTag Tag)> rows, long totalFocus)
     {
         var rowList = rows.ToList();
         bool hasFocus = totalFocus > 0;
@@ -984,14 +1032,10 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         // "Uncategorized"/"Other" over the user's real assignments.
         foreach (var a in ManagedApps) a.Detached = true;
 
-        var cats = _categories.List();
-
-        CategoryChoices.Clear();
-        CategoryChoices.Add(new CategoryChoice(null, "Uncategorized"));
-        foreach (var c in cats) CategoryChoices.Add(new CategoryChoice(c.Id, c.Name));
+        RebuildCategoryChoices();
 
         ManagedCategories.Clear();
-        foreach (var c in cats)
+        foreach (var c in _categories.List())
             ManagedCategories.Add(new CategoryItemVm(c.Id, c.Name, c.IsAuto, RenameCategory));
 
         ManagedApps.Clear();
@@ -999,6 +1043,18 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
             ManagedApps.Add(new AppCategoryItemVm(
                 a.AppId, a.DisplayName, a.ExeName, a.CategoryId, a.Tag,
                 AssignAppCategory, AssignAppTag));
+    }
+
+    // Rebuild the category dropdown choices (used by both the main grid and the Categories page). The
+    // main grid's rows are guarded so clearing the list can't push a spurious "Uncategorized" through
+    // their bound combos; Categories-page rows are guarded by their own Detached flag before this runs.
+    private void RebuildCategoryChoices()
+    {
+        foreach (var row in Rows) row.BeginSync();
+        CategoryChoices.Clear();
+        CategoryChoices.Add(new CategoryChoice(null, "Uncategorized"));
+        foreach (var c in _categories.List()) CategoryChoices.Add(new CategoryChoice(c.Id, c.Name));
+        foreach (var row in Rows) row.EndSync();
     }
 
     public void CreateCategory(string name)
@@ -1020,6 +1076,31 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         _categories.AssignApp(appId, categoryId);
 
     private void AssignAppTag(long appId, AppTag tag) => _categories.AssignTag(appId, tag);
+
+    // Immediate tag/category edits from the main dashboard grid, keyed by exe.
+    private void AssignCategoryByExe(string exeName, long? categoryId) =>
+        _categories.AssignAppByExe(exeName, categoryId);
+
+    private void AssignTagByExe(string exeName, AppTag tag) =>
+        _categories.AssignTagByExe(exeName, tag);
+
+    /// <summary>Clear the given apps' tracked time for the current range (keeps the apps and their
+    /// tags/categories). Flush first so the DB holds the pending deltas the reset then removes.</summary>
+    public void ResetSelection(IReadOnlyCollection<string> exeNames)
+    {
+        if (exeNames.Count == 0) return;
+        _tracker.Flush();
+        foreach (var exe in exeNames) _usage.ResetApp(exe, SelectedRange);
+        Reload();
+    }
+
+    /// <summary>Clear every app's tracked time for the current range (apps/tags/categories preserved).</summary>
+    public void ResetAllForRange()
+    {
+        _tracker.Flush();
+        _usage.ResetAll(SelectedRange);
+        Reload();
+    }
 
     /// <summary>Delete a watched app and its usage. It reappears the next time it's detected.</summary>
     public void DeleteApp(string exeName) => DeleteApps(new[] { exeName });

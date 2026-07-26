@@ -35,6 +35,7 @@ public sealed class UsageRow
     public string DisplayName { get; init; } = "";
     public long RunMs { get; init; }
     public long FocusMs { get; init; }
+    public long? CategoryId { get; init; }
     public string CategoryName { get; init; } = "";
     public AppTag Tag { get; init; } = AppTag.Other;
 }

@@ -58,7 +58,10 @@ public partial class App : Application
         ApplyAccent(Settings.GetAccentColor());
         ApplyMainColor(Settings.GetMainColor());
 
-        if (Settings.Get(FirstRunDoneKey) is null)
+        // Captured before the flag is set below, so the info popup can tell a fresh install (show the
+        // introduction) from an existing user who just updated (show patch notes).
+        bool freshInstall = Settings.Get(FirstRunDoneKey) is null;
+        if (freshInstall)
         {
             AutoStart.SetEnabled(true);
             Settings.Set(FirstRunDoneKey, "1");
@@ -100,6 +103,28 @@ public partial class App : Application
 
         // Opt-in: only reaches the network if the user enabled the daily check.
         MaybeAutoCheckForUpdates();
+
+        // Once the dashboard is up and startup has finished, show the one-time introduction (fresh
+        // install) or the patch notes (after a version change).
+        Dispatcher.BeginInvoke(new Action(() => MaybeShowInfo(freshInstall)));
+    }
+
+    /// <summary>Shows the introduction popup on a fresh install, or the patch-notes popup the first time
+    /// the app runs at a new version. Records the current version so each popup shows only once.</summary>
+    private void MaybeShowInfo(bool freshInstall)
+    {
+        var current = UpdateService.CurrentVersion.ToString(3);
+        InfoDialog? dlg = null;
+        if (freshInstall)
+            dlg = new InfoDialog("Introduction", "Welcome to ProgramClock.", InfoContent.Welcome);
+        else if (Settings.GetLastSeenVersion() != current)
+            dlg = new InfoDialog("Patch Notes", $"What's new in ProgramClock {current}.", InfoContent.PatchNotes);
+
+        Settings.SetLastSeenVersion(current);
+
+        if (dlg is null) return;
+        if (_dashboard is { IsVisible: true }) dlg.Owner = _dashboard;
+        dlg.ShowDialog();
     }
 
     private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)

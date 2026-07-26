@@ -4,7 +4,7 @@
         xmlns:local="clr-namespace:ProgramClock.UI"
         xmlns:ctrl="clr-namespace:ProgramClock.UI.Controls"
         xmlns:charts="clr-namespace:ProgramClock.UI.Charts"
-        Title="ProgramClock" MinHeight="320" MinWidth="480"
+        Title="ProgramClock" MinHeight="430" MinWidth="820"
         Icon="/app.ico"
         Background="{DynamicResource WindowBackgroundBrush}"
         WindowStartupLocation="Manual"
@@ -12,6 +12,7 @@
     <Window.Resources>
         <local:RefreshArcConverter x:Key="RefreshArc" />
         <ContextMenu x:Key="RowContextMenu" x:Shared="False">
+            <MenuItem Header="Reset data (current range)" Click="OnResetSelection" />
             <MenuItem Header="Delete" Click="OnDeleteSelection" />
             <MenuItem Header="Block" Click="OnBlockSelection" />
         </ContextMenu>
@@ -138,6 +139,9 @@
                             Visibility="{Binding MetricToggleVisibility}"
                             Click="OnToggleMetric" Width="90" Margin="16,0,0,0"
                             ToolTip="Switch charts between focused and running time" />
+                    <Button Content="Clear range data" Style="{StaticResource SubtleButton}"
+                            Click="OnClearRange" Margin="16,0,0,0"
+                            ToolTip="Delete all tracked time for the selected range" />
                 </StackPanel>
             </Grid>
 
@@ -163,6 +167,8 @@
                       GridLinesVisibility="Horizontal"
                       SelectionMode="Extended"
                       SelectionUnit="FullRow"
+                      EnableRowVirtualization="False"
+                      VirtualizingPanel.IsVirtualizing="False"
                       RowDetailsVisibilityMode="Visible">
                 <DataGrid.Resources>
                     <local:BindingProxy x:Key="proxy" Data="{Binding}" />
@@ -296,8 +302,26 @@
                     </DataGridTemplateColumn>
                     <DataGridTextColumn Header="Application" Binding="{Binding DisplayName}" Width="*" />
                     <DataGridTextColumn Header="Executable" Binding="{Binding ExeName}" Width="160" />
-                    <DataGridTextColumn Header="Category" Binding="{Binding CategoryName}" Width="140" />
-                    <DataGridTextColumn Header="Tag" Binding="{Binding TagName}" Width="100" />
+                    <DataGridTemplateColumn Header="Category" Width="140">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <ComboBox Margin="2,1"
+                                          ItemsSource="{Binding Data.CategoryChoices, Source={StaticResource proxy}}"
+                                          SelectedValuePath="Id" DisplayMemberPath="Name"
+                                          SelectedValue="{Binding SelectedCategoryId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Header="Tag" Width="100">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <ComboBox Margin="2,1"
+                                          ItemsSource="{Binding Data.TagChoices, Source={StaticResource proxy}}"
+                                          SelectedValuePath="Tag" DisplayMemberPath="Name"
+                                          SelectedValue="{Binding SelectedTag, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
                     <DataGridTextColumn x:Name="FocusedColumn" Binding="{Binding FocusTime}" Width="120"
                                         SortMemberPath="FocusMs">
                         <DataGridTextColumn.Header>
