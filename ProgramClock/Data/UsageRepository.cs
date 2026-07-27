@@ -41,16 +41,20 @@ public sealed class UsageRepository
             }
 
             long? categoryId = EnsureAutoCategoryId(exeName, publisher);
+            // A brand-new app starts on the default 'Other' tag; if it was auto-assigned to a category
+            // that defines a default tag, adopt that tag from the outset.
+            string? initialTag = categoryId is long cid ? GetCategoryDefaultTag(cid) : null;
 
             using var ins = _conn.CreateCommand();
             ins.CommandText =
-                "INSERT INTO apps(exe_name,display_name,exe_path,publisher,category_id,first_seen) " +
-                "VALUES($e,$d,$p,$c,$cat,$t); SELECT last_insert_rowid();";
+                "INSERT INTO apps(exe_name,display_name,exe_path,publisher,category_id,tag,first_seen) " +
+                "VALUES($e,$d,$p,$c,$cat,$tag,$t); SELECT last_insert_rowid();";
             ins.Parameters.AddWithValue("$e", exeName);
             ins.Parameters.AddWithValue("$d", (object?)displayName ?? DBNull.Value);
             ins.Parameters.AddWithValue("$p", (object?)exePath ?? DBNull.Value);
             ins.Parameters.AddWithValue("$c", (object?)publisher ?? DBNull.Value);
             ins.Parameters.AddWithValue("$cat", (object?)categoryId ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$tag", (object?)initialTag ?? DBNull.Value);
             ins.Parameters.AddWithValue("$t", DateTime.UtcNow.ToString("o"));
             return Convert.ToInt64(ins.ExecuteScalar());
         }
@@ -75,6 +79,17 @@ public sealed class UsageRepository
         ins.Parameters.AddWithValue("$n", name);
         ins.Parameters.AddWithValue("$t", DateTime.UtcNow.ToString("o"));
         return Convert.ToInt64(ins.ExecuteScalar());
+    }
+
+    /// <summary>The default tag (stored enum name) configured for a category, or null if it has none.
+    /// A brand-new app auto-assigned to the category adopts this as its initial tag.</summary>
+    private string? GetCategoryDefaultTag(long categoryId)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT default_tag FROM categories WHERE id=$id;";
+        cmd.Parameters.AddWithValue("$id", categoryId);
+        var raw = cmd.ExecuteScalar();
+        return raw is null or DBNull ? null : (string)raw;
     }
 
     /// <summary>Add run/focus deltas (ms) to the given app's row for the given local date.</summary>
@@ -322,6 +337,25 @@ public sealed class UsageRepository
                 });
             }
             return rows;
+        }
+    }
+
+    /// <summary>Look up an app's stored category (id + resolved name) and tag by exe, or null if it has
+    /// no row in the apps table yet. Used so a not-yet-flushed app shown in the grid still reflects a
+    /// category/tag the user just assigned — that write lands in the apps table before any usage_daily
+    /// row exists, so the usage query (which joins usage_daily) can't see it yet.</summary>
+    public (long? CategoryId, string CategoryName, AppTag Tag)? LookupAppMeta(string exeName)
+    {
+        lock (_conn)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText =
+                "SELECT a.category_id, COALESCE(c.name, 'Uncategorized'), COALESCE(a.tag, 'Other') " +
+                "FROM apps a LEFT JOIN categories c ON c.id = a.category_id WHERE a.exe_name = $e;";
+            cmd.Parameters.AddWithValue("$e", exeName);
+            using var r = cmd.ExecuteReader();
+            if (!r.Read()) return null;
+            return (r.IsDBNull(0) ? null : r.GetInt64(0), r.GetString(1), r.GetString(2).ParseTag());
         }
     }
 

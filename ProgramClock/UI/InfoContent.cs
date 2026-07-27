@@ -7,11 +7,12 @@ public static class InfoContent
     /// <summary>Bulleted changes for the current release, each noting where to find the feature.</summary>
     public static readonly IReadOnlyList<string> PatchNotes = new[]
     {
-        "New \"Minimal\" view (in the View selector) shows just two big figures — Focused, and Unfocused (in-use-but-not-focused time) — for an at-a-glance read of your day.",
-        "Fixed: the dashboard table's category and tag dropdowns now commit reliably when you pick an option.",
-        "Fixed: apps set to \"Uncategorized\" now show that in the table instead of appearing blank, including after visiting the Categories page.",
-        "Re-open this Patch Notes popup or the Introduction any time from Settings → General → Help.",
-        "Right-click → \"Reset data (current range)\" now clears both focused and running time for that app.",
+        "Categories can now have a default tag (set it on the Categories page). Apps moved into that category adopt the tag automatically — but only if you haven't already given the app a tag of your own.",
+        "New apps are now categorized immediately when first detected, instead of after a short delay.",
+        "You can set a minimum window width and height in Settings → General (use 0 for no limit, so you can resize the window freely).",
+        "The top bar now wraps its controls onto another line when the window is narrow, instead of clipping them.",
+        "The Minimal view's big figures now scale down to fit a smaller window.",
+        "Fixed: setting a brand-new app's category from the table no longer snaps back to Uncategorized.",
     };
 
     /// <summary>General how-to shown once on a fresh install.</summary>

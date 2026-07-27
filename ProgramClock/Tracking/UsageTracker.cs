@@ -26,6 +26,10 @@ public sealed class UsageTracker : IDisposable
     private readonly Dictionary<string, SitePending> _pendingSites = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _blocked = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _blockedSites = new(StringComparer.OrdinalIgnoreCase);
+    // Exes whose DB row we've already created this session, so a brand-new app is EnsureApp'd (and thus
+    // auto-categorized) exactly once, the moment it's first detected — not repeatedly. Cleared for an
+    // exe when it's forgotten/blocked so re-detection re-creates it.
+    private readonly HashSet<string> _ensured = new(StringComparer.OrdinalIgnoreCase);
 
     private volatile int _idleThresholdMs;
     private volatile int _focusTickMs;
@@ -284,6 +288,7 @@ public sealed class UsageTracker : IDisposable
 
     private void Accrue(AppInfo info, long runMs, long focusMs)
     {
+        bool firstSeen;
         lock (_gate)
         {
             if (_blocked.Contains(info.ExeName)) return;
@@ -292,7 +297,13 @@ public sealed class UsageTracker : IDisposable
             p.Info = info;
             p.RunMs += runMs;
             p.FocusMs += focusMs;
+            firstSeen = _ensured.Add(info.ExeName);
         }
+        // First time we've seen this app this session: create/auto-categorize its DB row right now
+        // (outside _gate — EnsureApp takes the DB lock) so its category and any category default tag are
+        // persisted immediately, instead of only at the next 30 s flush. EnsureApp is idempotent and
+        // auto-categorizes only on the initial insert, so this runs once per app.
+        if (firstSeen) _usage.EnsureApp(info.ExeName, info.DisplayName, info.ExePath, info.Publisher);
     }
 
     private void AccrueSite(AppInfo browser, string host, long focusMs)
@@ -327,6 +338,7 @@ public sealed class UsageTracker : IDisposable
         {
             _blocked.Add(exeName);
             _pending.Remove(exeName);
+            _ensured.Remove(exeName);
             RemovePendingSites(exeName);
         }
     }
@@ -386,6 +398,7 @@ public sealed class UsageTracker : IDisposable
         lock (_gate)
         {
             _pending.Remove(exeName);
+            _ensured.Remove(exeName);
             RemovePendingSites(exeName);
         }
     }

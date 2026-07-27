@@ -16,7 +16,7 @@ public sealed class CategoryRepository
         lock (_conn)
         {
             using var cmd = _conn.CreateCommand();
-            cmd.CommandText = "SELECT id, name, is_auto FROM categories ORDER BY name COLLATE NOCASE;";
+            cmd.CommandText = "SELECT id, name, is_auto, default_tag FROM categories ORDER BY name COLLATE NOCASE;";
             var list = new List<CategoryRecord>();
             using var r = cmd.ExecuteReader();
             while (r.Read())
@@ -25,6 +25,7 @@ public sealed class CategoryRepository
                     Id = r.GetInt64(0),
                     Name = r.GetString(1),
                     IsAuto = r.GetInt64(2) != 0,
+                    DefaultTag = r.IsDBNull(3) ? null : r.GetString(3).ParseTagOrNull(),
                 });
             return list;
         }
@@ -86,11 +87,67 @@ public sealed class CategoryRepository
     {
         lock (_conn)
         {
+            using (var cmd = _conn.CreateCommand())
+            {
+                cmd.CommandText = "UPDATE apps SET category_id=$c WHERE id=$a;";
+                cmd.Parameters.AddWithValue("$c", (object?)categoryId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$a", appId);
+                cmd.ExecuteNonQuery();
+            }
+            ApplyCategoryDefaultTag(appId, categoryId);
+        }
+    }
+
+    /// <summary>Set (or clear, with null) a category's default tag. Not retroactive: it only affects apps
+    /// moved into the category afterward.</summary>
+    public void SetDefaultTag(long categoryId, AppTag? tag)
+    {
+        lock (_conn)
+        {
             using var cmd = _conn.CreateCommand();
-            cmd.CommandText = "UPDATE apps SET category_id=$c WHERE id=$a;";
-            cmd.Parameters.AddWithValue("$c", (object?)categoryId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$a", appId);
+            cmd.CommandText = "UPDATE categories SET default_tag=$t WHERE id=$id;";
+            cmd.Parameters.AddWithValue("$t", (object?)tag?.ToString() ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$id", categoryId);
             cmd.ExecuteNonQuery();
+        }
+    }
+
+    // When an app is moved into a category that defines a default tag, adopt it — but only while the app
+    // is still on the default 'Other' tag. A tag the user set deliberately (Main/Secondary/Background) is
+    // preserved across category changes. Assumes the caller holds the connection lock.
+    private void ApplyCategoryDefaultTag(long appId, long? categoryId)
+    {
+        if (categoryId is not long catId) return;   // Uncategorized: nothing to apply
+
+        AppTag? def;
+        using (var sel = _conn.CreateCommand())
+        {
+            sel.CommandText = "SELECT default_tag FROM categories WHERE id=$id;";
+            sel.Parameters.AddWithValue("$id", catId);
+            var raw = sel.ExecuteScalar();
+            def = raw is null or DBNull ? null : ((string)raw).ParseTagOrNull();
+        }
+        if (def is not AppTag tag) return;          // category has no default tag
+
+        AppTag current;
+        using (var sel = _conn.CreateCommand())
+        {
+            sel.CommandText = "SELECT tag FROM apps WHERE id=$id;";
+            sel.Parameters.AddWithValue("$id", appId);
+            current = (sel.ExecuteScalar() as string).ParseTag();   // null/unset -> Other
+        }
+        if (current == AppTag.Other) AssignTag(appId, tag);
+    }
+
+    /// <summary>The app's current tag, defaulting to Other when unset.</summary>
+    public AppTag GetTag(long appId)
+    {
+        lock (_conn)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT COALESCE(tag,'Other') FROM apps WHERE id=$a;";
+            cmd.Parameters.AddWithValue("$a", appId);
+            return (cmd.ExecuteScalar() as string).ParseTag();
         }
     }
 

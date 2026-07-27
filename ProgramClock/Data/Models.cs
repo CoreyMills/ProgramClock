@@ -26,6 +26,11 @@ public static class AppTagExtensions
 {
     public static AppTag ParseTag(this string? value) =>
         Enum.TryParse<AppTag>(value, ignoreCase: true, out var t) ? t : AppTag.Other;
+
+    /// <summary>Parse a stored tag that may be absent: a valid enum name returns that tag; null, empty
+    /// or unrecognised returns null (used for the optional per-category default tag).</summary>
+    public static AppTag? ParseTagOrNull(this string? value) =>
+        Enum.TryParse<AppTag>(value, ignoreCase: true, out var t) ? t : null;
 }
 
 /// <summary>Aggregated usage for one app over a queried date range.</summary>
@@ -55,6 +60,10 @@ public sealed class CategoryRecord
     public required long Id { get; init; }
     public required string Name { get; init; }
     public bool IsAuto { get; init; }
+
+    /// <summary>Optional tag applied to apps moved into this category while they're still on the default
+    /// 'Other' tag. Null means the category doesn't change an app's tag.</summary>
+    public AppTag? DefaultTag { get; init; }
 }
 
 /// <summary>An app and its current category, for the categories management page.</summary>

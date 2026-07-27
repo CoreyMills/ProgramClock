@@ -35,6 +35,7 @@ public partial class MainWindow : Window
             App.Current.Categories);
         DataContext = _vm;
         EnableLiveSorting();
+        ApplyMinWindowSize();
         RestoreWindowBounds();
         LoadHotkeys();
         Closing += OnWindowClosing;
@@ -389,7 +390,18 @@ public partial class MainWindow : Window
         LockStopMinutesBox.Text = s.GetLockStopMinutes().ToString();
         TooltipDelayBox.Text = (s.GetTooltipDelayMs() / 1000.0).ToString("0.##", CultureInfo.InvariantCulture);
         GrowOnHoverCheck.IsChecked = s.GetGrowOnHover();
+        MinWidthBox.Text = s.GetMinWindowWidth().ToString();
+        MinHeightBox.Text = s.GetMinWindowHeight().ToString();
         StatusText.Text = "";
+    }
+
+    /// <summary>Apply the saved minimum window size to this window. 0 means no minimum. If the current
+    /// size is now below a new minimum, WPF grows the window to satisfy it.</summary>
+    private void ApplyMinWindowSize()
+    {
+        var s = App.Current.Settings;
+        MinWidth = s.GetMinWindowWidth();
+        MinHeight = s.GetMinWindowHeight();
     }
 
     // ── Accent colour ─────────────────────────────────────────────────────────────────────────────
@@ -797,6 +809,14 @@ public partial class MainWindow : Window
         }
         int tooltipDelay = (int)Math.Round(tooltipSeconds * 1000);
 
+        if (!int.TryParse(MinWidthBox.Text, out var minW) || minW < 0 ||
+            !int.TryParse(MinHeightBox.Text, out var minH) || minH < 0)
+        {
+            StatusText.Foreground = (Brush)FindResource("AccentBrush");
+            StatusText.Text = "Enter the minimum window width and height as whole numbers (0 or more; 0 = no limit).";
+            return;
+        }
+
         if (!_vm.TrySaveEfficiencyLabels(out var labelError))
         {
             StatusText.Foreground = (Brush)FindResource("AccentBrush");
@@ -854,6 +874,10 @@ public partial class MainWindow : Window
         var growOnHover = GrowOnHoverCheck.IsChecked == true;
         s.SetGrowOnHover(growOnHover);
         _vm.SetGrowOnHover(growOnHover);
+
+        s.SetMinWindowWidth(minW);
+        s.SetMinWindowHeight(minH);
+        ApplyMinWindowSize();
 
         _vm.ApplyRefreshSettings();
         _vm.Page = DashboardPage.Dashboard;

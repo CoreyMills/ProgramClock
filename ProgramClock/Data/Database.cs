@@ -9,7 +9,7 @@ namespace ProgramClock.Data;
 /// </summary>
 public sealed class Database : IDisposable
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
 
     public SqliteConnection Connection { get; }
     public string Path { get; }
@@ -52,8 +52,16 @@ public sealed class Database : IDisposable
         // a new `if (current < N) { … }` block below — do NOT edit an already-shipped step, and never
         // drop/recreate a table that holds user data.
         if (current < 1) MigrateToV1();
+        if (current < 2) MigrateToV2();
 
         if (current != SchemaVersion) SetSchemaVersion(SchemaVersion);
+    }
+
+    /// <summary>v2: an optional per-category default tag. When an app is moved into a category that has
+    /// one, and the app is still on the default 'Other' tag, it adopts this tag. Additive column.</summary>
+    private void MigrateToV2()
+    {
+        Exec("ALTER TABLE categories ADD COLUMN default_tag TEXT;");
     }
 
     /// <summary>v1 baseline: the original table set. Safe to run against an existing v1 database.</summary>

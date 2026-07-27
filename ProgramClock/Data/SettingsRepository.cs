@@ -20,6 +20,14 @@ public sealed class SettingsRepository
     public const string RunRefreshSecondsKey = "run_refresh_seconds";
     public const int DefaultRunRefreshSeconds = 5;
 
+    // Minimum dashboard window size. 0 means "no minimum" — the user can shrink the window freely.
+    // Defaults keep the whole top bar visible at its natural size.
+    public const string MinWindowWidthKey = "min_window_width";
+    public const int DefaultMinWindowWidth = 820;
+
+    public const string MinWindowHeightKey = "min_window_height";
+    public const int DefaultMinWindowHeight = 430;
+
     // Dashboard keyboard shortcuts: the WPF Key name (e.g. "Delete", "B") applied to the current
     // selection. An empty value means the action is unbound. Delete defaults to the Delete key; Block
     // is unbound by default so it never fires unexpectedly until the user assigns a key.
@@ -93,6 +101,24 @@ public sealed class SettingsRepository
 
     public void SetRunRefreshSeconds(int seconds) =>
         Set(RunRefreshSecondsKey, Math.Max(1, seconds).ToString());
+
+    /// <summary>Minimum window width in DIPs; 0 = no minimum. Defaults to <see cref="DefaultMinWindowWidth"/>.</summary>
+    public int GetMinWindowWidth()
+    {
+        var raw = Get(MinWindowWidthKey);
+        return int.TryParse(raw, out var v) && v >= 0 ? v : DefaultMinWindowWidth;
+    }
+
+    public void SetMinWindowWidth(int width) => Set(MinWindowWidthKey, Math.Max(0, width).ToString());
+
+    /// <summary>Minimum window height in DIPs; 0 = no minimum. Defaults to <see cref="DefaultMinWindowHeight"/>.</summary>
+    public int GetMinWindowHeight()
+    {
+        var raw = Get(MinWindowHeightKey);
+        return int.TryParse(raw, out var v) && v >= 0 ? v : DefaultMinWindowHeight;
+    }
+
+    public void SetMinWindowHeight(int height) => Set(MinWindowHeightKey, Math.Max(0, height).ToString());
 
     /// <summary>The key bound to Delete-selection (WPF Key name), or empty if unbound.</summary>
     public string GetDeleteHotkey() => Get(DeleteHotkeyKey) ?? DefaultDeleteHotkey;

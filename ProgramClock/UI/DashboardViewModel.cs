@@ -274,14 +274,19 @@ public sealed class RatingLabelVm
 public sealed class CategoryItemVm : INotifyPropertyChanged
 {
     private readonly Action<long, string> _rename;
+    private readonly Action<long, AppTag?> _setDefaultTag;
     private string _name;
+    private AppTag? _defaultTag;
 
-    public CategoryItemVm(long id, string name, bool isAuto, Action<long, string> rename)
+    public CategoryItemVm(long id, string name, bool isAuto, AppTag? defaultTag,
+        Action<long, string> rename, Action<long, AppTag?> setDefaultTag)
     {
         Id = id;
         _name = name;
         IsAuto = isAuto;
+        _defaultTag = defaultTag;
         _rename = rename;
+        _setDefaultTag = setDefaultTag;
     }
 
     public long Id { get; }
@@ -301,9 +306,40 @@ public sealed class CategoryItemVm : INotifyPropertyChanged
         }
     }
 
+    // Non-null binding key for the default-tag combo: -1 = "No default" (null), otherwise the AppTag's
+    // int value. A ComboBox can't select a null SelectedValue, so the combo binds this instead.
+    public const int NoDefaultKey = -1;
+
+    /// <summary>The category's default tag, or null for "No default". Persists on change.</summary>
+    public AppTag? DefaultTag
+    {
+        get => _defaultTag;
+        set
+        {
+            if (_defaultTag == value) return;
+            _defaultTag = value;
+            _setDefaultTag(Id, value);
+            OnChanged();
+            OnChanged(nameof(DefaultTagKey));
+        }
+    }
+
+    public int DefaultTagKey
+    {
+        get => _defaultTag is AppTag t ? (int)t : NoDefaultKey;
+        set => DefaultTag = value == NoDefaultKey ? null : (AppTag)value;
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnChanged([CallerMemberName] string? n = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
+}
+
+/// <summary>A choice in a category's "Default tag" dropdown: the tags plus a "No default" (null) entry.
+/// Binds on the non-null <see cref="Key"/> so the null option is still selectable.</summary>
+public sealed record DefaultTagChoice(AppTag? Tag, string Name)
+{
+    public int Key => Tag is AppTag t ? (int)t : CategoryItemVm.NoDefaultKey;
 }
 
 /// <summary>An app row on the management page. Changing <see cref="CategoryId"/> persists the
@@ -312,11 +348,12 @@ public sealed class AppCategoryItemVm : INotifyPropertyChanged
 {
     private readonly Action<long, long?> _assign;
     private readonly Action<long, AppTag> _assignTag;
+    private readonly Func<long, AppTag> _currentTag;
     private long? _categoryId;
     private AppTag _tag;
 
     public AppCategoryItemVm(long appId, string displayName, string exeName, long? categoryId,
-        AppTag tag, Action<long, long?> assign, Action<long, AppTag> assignTag)
+        AppTag tag, Action<long, long?> assign, Action<long, AppTag> assignTag, Func<long, AppTag> currentTag)
     {
         AppId = appId;
         DisplayName = displayName;
@@ -325,6 +362,7 @@ public sealed class AppCategoryItemVm : INotifyPropertyChanged
         _tag = tag;
         _assign = assign;
         _assignTag = assignTag;
+        _currentTag = currentTag;
     }
 
     public long AppId { get; }
@@ -345,6 +383,16 @@ public sealed class AppCategoryItemVm : INotifyPropertyChanged
             _categoryId = value;
             _assign(AppId, value);
             OnChanged();
+
+            // Assigning the category may have applied the category's default tag (when the app was still
+            // on 'Other'). Reflect that here so the row's Tag combo updates live. Set the backing field
+            // directly so this refresh isn't re-persisted as a user tag edit.
+            var applied = _currentTag(AppId);
+            if (applied != _tag)
+            {
+                _tag = applied;
+                OnChanged(nameof(Tag));
+            }
         }
     }
 
@@ -519,6 +567,8 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
     public ObservableCollection<CategoryChoice> CategoryChoices { get; } = new();
     /// <summary>Tag choices (value + current display name) for the per-app tag dropdown.</summary>
     public ObservableCollection<TagChoice> TagChoices { get; } = new();
+    /// <summary>Choices for a category's "Default tag" dropdown: "No default" plus each tag.</summary>
+    public ObservableCollection<DefaultTagChoice> DefaultTagChoices { get; } = new();
 
     /// <summary>Editable tag display-name/weight rows shown on the settings page.</summary>
     public ObservableCollection<TagLabelVm> TagLabels { get; } = new();
@@ -802,14 +852,33 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
         {
             var had = merged.TryGetValue(p.ExeName, out var cur);
             var name = string.IsNullOrEmpty(cur.Name) ? p.DisplayName : cur.Name;
-            // A brand-new app isn't in the DB yet (EnsureApp runs at flush time), so apply the same
-            // auto-category rule here to show its category immediately instead of "Uncategorized"
-            // until the next flush re-reads it.
-            var cat = had
-                ? (string.IsNullOrEmpty(cur.Category) ? "Uncategorized" : cur.Category)
-                : (CategoryRules.Guess(p.ExeName, p.Publisher) ?? "Uncategorized");
-            var catId = had ? cur.CategoryId : null;
-            var tag = had ? cur.Tag : AppTag.Other;
+
+            long? catId;
+            string cat;
+            AppTag tag;
+            if (had)
+            {
+                catId = cur.CategoryId;
+                cat = string.IsNullOrEmpty(cur.Category) ? "Uncategorized" : cur.Category;
+                tag = cur.Tag;
+            }
+            else if (_usage.LookupAppMeta(p.ExeName) is { } meta)
+            {
+                // The app has a row in the apps table (e.g. the user just set its category/tag from the
+                // grid) but hasn't flushed a usage_daily row yet, so the query above didn't return it.
+                // Honour its stored category/tag instead of resetting the user's pick to a guess.
+                catId = meta.CategoryId;
+                cat = meta.CategoryName;
+                tag = meta.Tag;
+            }
+            else
+            {
+                // Truly brand-new (no apps row yet): show the auto-category guess until the first flush
+                // inserts its row.
+                catId = null;
+                cat = CategoryRules.Guess(p.ExeName, p.Publisher) ?? "Uncategorized";
+                tag = AppTag.Other;
+            }
             merged[p.ExeName] = (name, cur.Run + p.RunMs, cur.Focus + p.FocusMs, catId, cat, tag);
         }
 
@@ -1057,13 +1126,14 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
 
         ManagedCategories.Clear();
         foreach (var c in _categories.List())
-            ManagedCategories.Add(new CategoryItemVm(c.Id, c.Name, c.IsAuto, RenameCategory));
+            ManagedCategories.Add(new CategoryItemVm(
+                c.Id, c.Name, c.IsAuto, c.DefaultTag, RenameCategory, SetCategoryDefaultTag));
 
         ManagedApps.Clear();
         foreach (var a in _categories.ListApps())
             ManagedApps.Add(new AppCategoryItemVm(
                 a.AppId, a.DisplayName, a.ExeName, a.CategoryId, a.Tag,
-                AssignAppCategory, AssignAppTag));
+                AssignAppCategory, AssignAppTag, CurrentAppTag));
     }
 
     // Rebuild the category dropdown choices (used by both the main grid and the Categories page). The
@@ -1094,10 +1164,14 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
 
     private void RenameCategory(long id, string name) => _categories.Rename(id, name);
 
+    private void SetCategoryDefaultTag(long id, AppTag? tag) => _categories.SetDefaultTag(id, tag);
+
     private void AssignAppCategory(long appId, long? categoryId) =>
         _categories.AssignApp(appId, categoryId);
 
     private void AssignAppTag(long appId, AppTag tag) => _categories.AssignTag(appId, tag);
+
+    private AppTag CurrentAppTag(long appId) => _categories.GetTag(appId);
 
     // Immediate tag/category edits from the main dashboard grid, keyed by exe (called from the grid's
     // dropdown SelectionChanged handlers).
@@ -1260,6 +1334,12 @@ public sealed class DashboardViewModel : INotifyPropertyChanged, IDisposable
             TagChoices.Add(new TagChoice(t, _labels.TagName(t)));
         // Repopulating cleared every bound combo; re-assert each row's selection so they re-resolve.
         foreach (var row in Rows) { row.RefreshComboSelections(); row.EndSync(); }
+
+        // Category default-tag choices track the same labels, with a leading "No default" (null) entry.
+        DefaultTagChoices.Clear();
+        DefaultTagChoices.Add(new DefaultTagChoice(null, "No default"));
+        foreach (var t in EfficiencySettings.Tags)
+            DefaultTagChoices.Add(new DefaultTagChoice(t, _labels.TagName(t)));
     }
 
     /// <summary>Populate the settings-page tag/efficiency editors from the saved labels and weights.</summary>
